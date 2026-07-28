@@ -42,12 +42,17 @@ export const api = {
   apiUrl: API_URL,
   staffLogin: (email, password) => request("/api/auth/staff/login", { method: "POST", body: { email, password } }),
   portalLogin: (email, password) => request("/api/auth/portal/login", { method: "POST", body: { email, password } }),
+  me: () => request("/api/auth/me"),
 
   getClients: () => request("/api/clients"),
   addClient: (body) => request("/api/clients", { method: "POST", body }),
   resetClientPassword: (id) => request(`/api/clients/${id}/reset-password`, { method: "POST" }),
 
   getLinenTypes: () => request("/api/linen-types"),
+  addLinenType: (body) => request("/api/linen-types", { method: "POST", body }),
+  patchLinenType: (id, body) => request(`/api/linen-types/${id}`, { method: "PATCH", body }),
+  reorderLinenTypes: (orderedIds) => request("/api/linen-types/reorder", { method: "PATCH", body: { orderedIds } }),
+  deleteLinenType: (id) => request(`/api/linen-types/${id}`, { method: "DELETE" }),
 
   scanReception: (body) => request("/api/scan/reception", { method: "POST", body }),
   scanCheck: (body) => request("/api/scan/check", { method: "POST", body }),
