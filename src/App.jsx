@@ -534,9 +534,10 @@ function Facturation({ db, typeById, refresh, notify }) {
 function Clients({ db, refresh, notify }) {
   const [name, setName] = useState(""); const [address, setAddress] = useState(""); const [email, setEmail] = useState(""); const [adding, setAdding] = useState(false);
 
-  async function addClient(e) {
+ async function addClient(e) {
     e.preventDefault();
-    if (!name.trim() || !email.trim()) return;
+    if (!name.trim()) { notify("Le nom du client est obligatoire."); return; }
+    if (!email.trim()) { notify("L'email du client est obligatoire (il sert à se connecter à l'espace client)."); return; }
     try {
       const res = await api.addClient({ name: name.trim(), address: address.trim(), email: email.trim() });
       notify(`Client ajouté — mot de passe espace client (à communiquer au client) : ${res.temporaryPassword}`);
