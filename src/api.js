@@ -45,8 +45,27 @@ export const api = {
   me: () => request("/api/auth/me"),
 
   getClients: () => request("/api/clients"),
+  getClient: (id) => request(`/api/clients/${id}`),
   addClient: (body) => request("/api/clients", { method: "POST", body }),
+  patchClient: (id, body) => request(`/api/clients/${id}`, { method: "PATCH", body }),
   resetClientPassword: (id) => request(`/api/clients/${id}/reset-password`, { method: "POST" }),
+
+  getClientCategories: () => request("/api/client-categories"),
+  addClientCategory: (body) => request("/api/client-categories", { method: "POST", body }),
+  patchClientCategory: (id, body) => request(`/api/client-categories/${id}`, { method: "PATCH", body }),
+  deleteClientCategory: (id) => request(`/api/client-categories/${id}`, { method: "DELETE" }),
+
+  getPaymentMethods: () => request("/api/payment-methods"),
+  addPaymentMethod: (body) => request("/api/payment-methods", { method: "POST", body }),
+  patchPaymentMethod: (id, body) => request(`/api/payment-methods/${id}`, { method: "PATCH", body }),
+  deletePaymentMethod: (id) => request(`/api/payment-methods/${id}`, { method: "DELETE" }),
+
+  inviteProspect: () => request("/api/staff/prospects/invite", { method: "POST" }),
+  getProspects: () => request("/api/staff/prospects"),
+  approveProspect: (id) => request(`/api/staff/prospects/${id}/approve`, { method: "POST" }),
+  rejectProspect: (id) => request(`/api/staff/prospects/${id}/reject`, { method: "POST" }),
+  getProspectPublic: (token) => request(`/api/prospects/${token}`),
+  submitProspectPublic: (token, body) => request(`/api/prospects/${token}`, { method: "POST", body }),
 
   getLinenTypes: () => request("/api/linen-types"),
   addLinenType: (body) => request("/api/linen-types", { method: "POST", body }),
