@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   LayoutDashboard, PackageCheck, Truck, AlertTriangle, Building2, Radio, Plus, X, Check,
-  Loader2, FileText, Send, Pencil, Trash2, Printer, Lock, LogOut, Eye, Receipt,
+  Loader2, FileText, Send, Pencil, Trash2, Printer, Lock, LogOut, Eye, Receipt, ArrowUp, ArrowDown, ShieldCheck, EyeOff, Tags,
 } from "lucide-react";
 import { api, setToken, getToken } from "./api.js";
 import { connectRealtime, onRealtime, disconnectRealtime } from "./realtime.js";
@@ -192,7 +192,7 @@ function Dashboard({ db, typeById }) {
 
 function Reception({ db, typeById, refresh, notify }) {
   const [clientId, setClientId] = useState(db.clients[0]?.id || "");
-  const [typeId, setTypeId] = useState(db.linenTypes[0]?.id || "");
+  const [typeId, setTypeId] = useState(db.linenTypes.find((t) => t.active)?.id || "");
   const [tagInput, setTagInput] = useState("");
   const [log, setLog] = useState([]);
   const [sessionCount, setSessionCount] = useState(0);
@@ -226,7 +226,7 @@ function Reception({ db, typeById, refresh, notify }) {
         <label className="field-label">Client</label>
         <select className="ubq-select" value={clientId} onChange={(e) => setClientId(e.target.value)}>{db.clients.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}</select>
         <label className="field-label">Type de linge scanné</label>
-        <select className="ubq-select" value={typeId} onChange={(e) => setTypeId(e.target.value)}>{db.linenTypes.map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}</select>
+        <select className="ubq-select" value={typeId} onChange={(e) => setTypeId(e.target.value)}>{db.linenTypes.filter((t) => t.active).map((t) => (<option key={t.id} value={t.id}>{t.name}</option>))}</select>
         <label className="field-label">Scanner (tapez/collez le tag, ou générez-en un)</label>
         <form onSubmit={submitTag} style={{ display: "flex", gap: 8 }}>
           <input ref={inputRef} className="ubq-input mono" placeholder="RFID-XXXXXX" value={tagInput} onChange={(e) => setTagInput(e.target.value)} />
@@ -378,8 +378,12 @@ function BonsLivraison({ db, typeById, refresh, notify }) {
   const notes = [...db.deliveryNotes].filter((n) => filterClient === "all" || n.clientId === filterClient).sort((a, b) => b.createdAt - a.createdAt);
 
   async function sendNote(note) {
-    try { await api.sendDeliveryNote(note.id); notify(`${note.numero} envoyé (simulation) à ${client(note.clientId)?.email}.`); refresh(); }
-    catch (err) { notify(`Erreur : ${err.message}`); }
+    try {
+      const res = await api.sendDeliveryNote(note.id);
+      if (res.emailSent) notify(`${note.numero} envoyé par email à ${client(note.clientId)?.email}.`);
+      else notify(`${note.numero} marqué envoyé, mais l'email n'a pas pu partir (${res.emailReason || "voir configuration"}).`);
+      refresh();
+    } catch (err) { notify(`Erreur : ${err.message}`); }
   }
   async function deleteNote(note) {
     if (!window.confirm(`Supprimer le bon ${note.numero} ? Les articles repasseront "en lavage".`)) return;
@@ -531,12 +535,150 @@ function Facturation({ db, typeById, refresh, notify }) {
   );
 }
 
+function Articles({ db, me, refresh, notify }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [price, setPrice] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editPrice, setEditPrice] = useState("");
+  const isAdmin = me?.role === "admin";
+
+  const sorted = [...db.linenTypes].sort((a, b) => a.sort_order - b.sort_order);
+
+  async function addType(e) {
+    e.preventDefault();
+    if (!name.trim()) { notify("Le nom de l'article est obligatoire."); return; }
+    if (price === "" || isNaN(parseFloat(price))) { notify("Le prix doit être un nombre."); return; }
+    try {
+      await api.addLinenType({ name: name.trim(), price: parseFloat(price) });
+      notify(`Article "${name.trim()}" ajouté.`);
+      setName(""); setPrice(""); setAdding(false); refresh();
+    } catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  function startEdit(t) { setEditingId(t.id); setEditName(t.name); setEditPrice(String(t.price)); }
+
+  async function saveEdit(id) {
+    if (!editName.trim() || isNaN(parseFloat(editPrice))) { notify("Nom et prix valides requis."); return; }
+    try {
+      await api.patchLinenType(id, { name: editName.trim(), price: parseFloat(editPrice) });
+      setEditingId(null); refresh();
+    } catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  async function toggleActive(t) {
+    try {
+      await api.patchLinenType(t.id, { active: t.active ? false : true });
+      refresh();
+    } catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  async function remove(t) {
+    if (!window.confirm(`Supprimer définitivement "${t.name}" ?`)) return;
+    try { await api.deleteLinenType(t.id); notify(`"${t.name}" supprimé.`); refresh(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  async function move(index, direction) {
+    const target = index + direction;
+    if (target < 0 || target >= sorted.length) return;
+    const reordered = [...sorted];
+    [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+    try { await api.reorderLinenTypes(reordered.map((t) => t.id)); refresh(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  return (
+    <div>
+      <div className="ubq-card" style={{ marginBottom: 16 }}>
+        <div className="row-between">
+          <div>
+            <h3 className="card-title" style={{ marginBottom: 4 }}>Articles</h3>
+            <div className="muted small">Catalogue commun à tous les clients, avec le tarif de base de chaque article.</div>
+          </div>
+          <button className="btn btn-steel btn-sm" onClick={() => setAdding((a) => !a)}><Plus size={14} /> Ajouter un article</button>
+        </div>
+        {adding && (
+          <form onSubmit={addType} className="add-client-form">
+            <input className="ubq-input" placeholder="Nom de l'article" value={name} onChange={(e) => setName(e.target.value)} style={{ flex: 2 }} />
+            <input className="ubq-input mono" placeholder="Prix (€)" type="number" step="0.01" min="0" value={price} onChange={(e) => setPrice(e.target.value)} style={{ maxWidth: 120 }} />
+            <button className="btn btn-moss btn-sm" type="submit"><Check size={14} /> Enregistrer</button>
+          </form>
+        )}
+      </div>
+
+      <div className="ubq-card">
+        <table className="ubq-table">
+          <thead><tr><th style={{ width: 70 }}>Ordre</th><th>Nom</th><th>Prix unitaire</th><th>Statut</th><th></th></tr></thead>
+          <tbody>
+            {sorted.map((t, i) => (
+              <tr key={t.id} style={t.active ? {} : { opacity: 0.55 }}>
+                <td>
+                  <div className="actions-row" style={{ justifyContent: "flex-start" }}>
+                    <button className="icon-btn" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Monter"><ArrowUp size={14} /></button>
+                    <button className="icon-btn" disabled={i === sorted.length - 1} onClick={() => move(i, 1)} aria-label="Descendre"><ArrowDown size={14} /></button>
+                  </div>
+                </td>
+                <td>
+                  {editingId === t.id
+                    ? <input className="ubq-input" value={editName} onChange={(e) => setEditName(e.target.value)} style={{ maxWidth: 220 }} />
+                    : t.name}
+                </td>
+                <td className="mono">
+                  {editingId === t.id
+                    ? <input className="ubq-input mono" type="number" step="0.01" min="0" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} style={{ maxWidth: 110 }} />
+                    : fmtEUR(t.price)}
+                </td>
+                <td>
+                  {t.active ? <span className="pill pill-moss">Actif</span> : <span className="pill pill-amber">Désactivé</span>}
+                </td>
+                <td>
+                  <div className="actions-row">
+                    {editingId === t.id ? (
+                      <>
+                        <button className="icon-btn" title="Enregistrer" onClick={() => saveEdit(t.id)}><Check size={15} /></button>
+                        <button className="icon-btn" title="Annuler" onClick={() => setEditingId(null)}><X size={15} /></button>
+                      </>
+                    ) : (
+                      <button className="icon-btn" title="Modifier" onClick={() => startEdit(t)}><Pencil size={15} /></button>
+                    )}
+                    {t.active ? (
+                      <button className="icon-btn" title="Désactiver" onClick={() => toggleActive(t)}><EyeOff size={15} /></button>
+                    ) : (
+                      <button
+                        className="icon-btn"
+                        title={isAdmin ? "Réactiver" : "Réservé à un administrateur"}
+                        disabled={!isAdmin}
+                        onClick={() => toggleActive(t)}
+                      >
+                        <Eye size={15} />
+                      </button>
+                    )}
+                    <button className="icon-btn" title="Supprimer" onClick={() => remove(t)}><Trash2 size={15} /></button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {sorted.length === 0 && <tr><td colSpan={5} className="term-muted" style={{ padding: 14 }}>Aucun article pour l'instant.</td></tr>}
+          </tbody>
+        </table>
+        <div className="hint">
+          La suppression n'est possible que pour un article jamais utilisé — sinon, désactivez-le pour conserver l'historique.
+          {!isAdmin && " Réactiver un article désactivé nécessite un compte administrateur."}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Clients({ db, refresh, notify }) {
   const [name, setName] = useState(""); const [address, setAddress] = useState(""); const [email, setEmail] = useState(""); const [adding, setAdding] = useState(false);
 
   async function addClient(e) {
     e.preventDefault();
-    if (!name.trim() || !email.trim()) return;
+    if (!name.trim()) { notify("Le nom du client est obligatoire."); return; }
+    if (!email.trim()) { notify("L'email du client est obligatoire (il sert à se connecter à l'espace client)."); return; }
     try {
       const res = await api.addClient({ name: name.trim(), address: address.trim(), email: email.trim() });
       notify(`Client ajouté — mot de passe espace client (à communiquer au client) : ${res.temporaryPassword}`);
@@ -584,10 +726,10 @@ function Clients({ db, refresh, notify }) {
         );
       })}
       <div className="ubq-card" style={{ marginBottom: 16 }}>
-        <h3 className="card-title">Tarifs par type de linge</h3>
-        <table className="ubq-table"><thead><tr><th>Type</th><th>Prix unitaire</th></tr></thead>
-          <tbody>{db.linenTypes.map((t) => (<tr key={t.id}><td>{t.name}</td><td className="mono">{fmtEUR(t.price)}</td></tr>))}</tbody></table>
-        <div className="hint">La modification des tarifs se fait directement en base pour l'instant (table linen_types) — une interface dédiée pourra être ajoutée si besoin.</div>
+        <div className="row-between">
+          <h3 className="card-title" style={{ marginBottom: 0 }}>Tarifs</h3>
+          <span className="muted small">Gérés désormais dans l'onglet "Articles".</span>
+        </div>
       </div>
       <div className="ubq-card">
         <h3 className="card-title">Coordonnées sur les documents (bons / factures)</h3>
@@ -754,6 +896,7 @@ const NAV = [
   { id: "bons", label: "Bons de livraison", icon: FileText },
   { id: "facturation", label: "Facturation", icon: Receipt },
   { id: "perdu", label: "Linge perdu", icon: AlertTriangle },
+  { id: "articles", label: "Articles", icon: Tags },
   { id: "clients", label: "Clients", icon: Building2 },
 ];
 
@@ -762,6 +905,7 @@ export default function App() {
   const [clientAuth, setClientAuth] = useState(() => { try { return JSON.parse(localStorage.getItem("tracalinge_client")); } catch { return null; } });
   const [tab, setTab] = useState("dashboard");
   const [db, setDb] = useState(null);
+  const [me, setMe] = useState(null);
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
 
@@ -773,9 +917,10 @@ export default function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [clients, linenTypes, items, deliveryNotes, invoices, settings] = await Promise.all([
-        api.getClients(), api.getLinenTypes(), api.getItems(), api.getDeliveryNotes(), api.getInvoices(), api.getSettings(),
+      const [clients, linenTypes, items, deliveryNotes, invoices, settings, meInfo] = await Promise.all([
+        api.getClients(), api.getLinenTypes(), api.getItems(), api.getDeliveryNotes(), api.getInvoices(), api.getSettings(), api.me(),
       ]);
+      setMe(meInfo);
       const next = {
         clients: clients.map(normClient), linenTypes, items: items.map(normItem),
         deliveryNotes: deliveryNotes.map(normNote), invoices: invoices.map(normInvoice), settings: normSettings(settings),
@@ -838,6 +983,7 @@ export default function App() {
         ); })}</nav>
         <button className="nav-item" onClick={() => setRole("client")}><Lock size={17} /><span>Espace client</span></button>
         <button className="nav-item" onClick={logoutStaff}><LogOut size={17} /><span>Déconnexion</span></button>
+        {me?.role === "admin" && <div className="admin-badge"><ShieldCheck size={12} /> Administrateur</div>}
       </aside>
       <main className="main">
         <header className="topbar no-print">
@@ -851,6 +997,7 @@ export default function App() {
           {tab === "bons" && <BonsLivraison db={db} typeById={typeById} refresh={refresh} notify={notify} />}
           {tab === "facturation" && <Facturation db={db} typeById={typeById} refresh={refresh} notify={notify} />}
           {tab === "perdu" && <LingePerdu db={db} typeById={typeById} refresh={refresh} notify={notify} />}
+          {tab === "articles" && <Articles db={db} me={me} refresh={refresh} notify={notify} />}
           {tab === "clients" && <Clients db={db} refresh={refresh} notify={notify} />}
         </div>
       </main>
@@ -897,6 +1044,7 @@ const CSS = `
 .nav-item { display:flex; align-items:center; gap:10px; width:100%; padding:10px 12px; border-radius:8px; background:none; border:none; color:#AFC6D6; font-size:14px; font-weight:500; cursor:pointer; text-align:left; margin-bottom:2px; transition:background .15s,color .15s; }
 .nav-item:hover { background:var(--graphite-700); color:#fff; } .nav-item.active { background:var(--moss); color:#fff; }
 .nav-item:focus-visible { outline:2px solid #7FA0D8; outline-offset:1px; } .sidebar-foot { margin-top:12px; font-size:11px; padding:8px; color:#6F8CA1; }
+.admin-badge { display:flex; align-items:center; gap:5px; font-size:11px; color:#7FE0C8; padding:8px 12px 0; }
 .main { flex:1; display:flex; flex-direction:column; min-width:0; }
 .topbar { display:flex; align-items:baseline; justify-content:space-between; padding:22px 28px 14px; border-bottom:1px solid var(--line); background:var(--paper); }
 .topbar h1 { font-family:'Space Grotesk',sans-serif; font-size:22px; font-weight:600; letter-spacing:-0.01em; margin:0; }
