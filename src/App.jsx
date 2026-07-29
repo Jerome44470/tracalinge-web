@@ -47,7 +47,17 @@ function normNote(n) {
 function normInvoice(inv) {
   return { id: inv.id, numero: inv.numero, clientId: inv.client_id, periodType: inv.period_type, total: inv.total_ht, createdAt: inv.created_at, deliveryNoteIds: inv.deliveryNoteIds || [] };
 }
-function normClient(c) { return { id: c.id, name: c.name, address: c.address, email: c.email, createdAt: c.created_at }; }
+function normClient(c) {
+  return {
+    id: c.id, name: c.name, clientNumber: c.client_number, categoryId: c.category_id,
+    address: c.address, billingAddress: c.billing_address, email: c.email, siret: c.siret,
+    referentName: c.referent_name, referentPhone: c.referent_phone, referentEmail: c.referent_email,
+    accountingName: c.accounting_name, accountingPhone: c.accounting_phone, accountingEmail: c.accounting_email,
+    paymentMethodId: c.payment_method_id, paymentDays: c.payment_days, rib: c.rib,
+    blShowPrices: !!c.bl_show_prices, createdAt: c.created_at,
+    emails: (c.emails || []).map((e) => ({ id: e.id, email: e.email, isContact: !!e.is_contact, isBl: !!e.is_bl, isFacture: !!e.is_facture })),
+  };
+}
 function normSettings(s) {
   return { ...s, thresholdDays: Number(s.thresholdDays || 5), paymentTermsDays: Number(s.paymentTermsDays || 30), tvaRate: Number(s.tvaRate || 20) };
 }
@@ -672,19 +682,288 @@ function Articles({ db, me, refresh, notify }) {
   );
 }
 
-function Clients({ db, refresh, notify }) {
-  const [name, setName] = useState(""); const [address, setAddress] = useState(""); const [email, setEmail] = useState(""); const [adding, setAdding] = useState(false);
+function emptyClientForm() {
+  return {
+    name: "", email: "", address: "", billingAddress: "", sameAsDelivery: true, categoryId: "",
+    siret: "", referentName: "", referentPhone: "", referentEmail: "",
+    accountingName: "", accountingPhone: "", accountingEmail: "",
+    paymentMethodId: "", paymentDays: "", rib: "", blShowPrices: true,
+    emails: [],
+  };
+}
 
- async function addClient(e) {
-    e.preventDefault();
-    if (!name.trim()) { notify("Le nom du client est obligatoire."); return; }
-    if (!email.trim()) { notify("L'email du client est obligatoire (il sert à se connecter à l'espace client)."); return; }
-    try {
-      const res = await api.addClient({ name: name.trim(), address: address.trim(), email: email.trim() });
-      notify(`Client ajouté — mot de passe espace client (à communiquer au client) : ${res.temporaryPassword}`);
-      setName(""); setAddress(""); setEmail(""); setAdding(false); refresh();
-    } catch (err) { notify(`Erreur : ${err.message}`); }
+function ClientFieldsForm({ form, setForm, categories, paymentMethods, loginEmailEditable = true }) {
+  function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  function addEmailRow() { setForm((f) => ({ ...f, emails: [...f.emails, { email: "", isContact: false, isBl: false, isFacture: false }] })); }
+  function updateEmailRow(i, patch) { setForm((f) => ({ ...f, emails: f.emails.map((e, idx) => (idx === i ? { ...e, ...patch } : e)) })); }
+  function removeEmailRow(i) { setForm((f) => ({ ...f, emails: f.emails.filter((_, idx) => idx !== i) })); }
+
+  function onPaymentMethodChange(id) {
+    const method = paymentMethods.find((m) => m.id === id);
+    setForm((f) => ({ ...f, paymentMethodId: id, paymentDays: method ? method.default_days : f.paymentDays }));
   }
+
+  return (
+    <div>
+      <div className="two-col">
+        <div>
+          <label className="field-label">Nom du client</label>
+          <input className="ubq-input" value={form.name} onChange={(e) => set("name", e.target.value)} />
+          <label className="field-label">Catégorie</label>
+          <select className="ubq-select" value={form.categoryId} onChange={(e) => set("categoryId", e.target.value)}>
+            <option value="">— Sélectionner —</option>
+            {categories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+          </select>
+          <label className="field-label">Email de connexion (espace client)</label>
+          <input className="ubq-input" value={form.email} disabled={!loginEmailEditable} onChange={(e) => set("email", e.target.value)} />
+          <label className="field-label">SIRET</label>
+          <input className="ubq-input" value={form.siret} onChange={(e) => set("siret", e.target.value)} />
+        </div>
+        <div>
+          <label className="field-label">Adresse de livraison</label>
+          <textarea className="ubq-input" rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} />
+          <div className="row-between" style={{ margin: "10px 0 5px" }}>
+            <span className="field-label" style={{ margin: 0 }}>Adresse de facturation</span>
+            <label className="check-inline">
+              <input type="checkbox" checked={form.sameAsDelivery} onChange={(e) => set("sameAsDelivery", e.target.checked)} /> identique à la livraison
+            </label>
+          </div>
+          <textarea className="ubq-input" rows={2} disabled={form.sameAsDelivery} value={form.sameAsDelivery ? form.address : form.billingAddress} onChange={(e) => set("billingAddress", e.target.value)} />
+        </div>
+      </div>
+
+      <div className="row-between" style={{ marginTop: 16 }}>
+        <span className="field-label" style={{ margin: 0 }}>Emails (contact / envoi BL / envoi facture)</span>
+        <button type="button" className="btn-link" onClick={addEmailRow}>+ Ajouter un email</button>
+      </div>
+      {form.emails.map((e, i) => (
+        <div className="email-row" key={i}>
+          <input className="ubq-input" placeholder="email@exemple.fr" value={e.email} onChange={(ev) => updateEmailRow(i, { email: ev.target.value })} />
+          <label className="check-inline"><input type="checkbox" checked={e.isContact} onChange={(ev) => updateEmailRow(i, { isContact: ev.target.checked })} /> Contact</label>
+          <label className="check-inline"><input type="checkbox" checked={e.isBl} onChange={(ev) => updateEmailRow(i, { isBl: ev.target.checked })} /> Envoi BL</label>
+          <label className="check-inline"><input type="checkbox" checked={e.isFacture} onChange={(ev) => updateEmailRow(i, { isFacture: ev.target.checked })} /> Envoi facture</label>
+          <button type="button" className="icon-btn" onClick={() => removeEmailRow(i)}><X size={14} /></button>
+        </div>
+      ))}
+      {form.emails.length === 0 && <div className="term-muted small" style={{ marginTop: 4 }}>Aucun email additionnel.</div>}
+
+      <div className="two-col" style={{ marginTop: 16 }}>
+        <div>
+          <label className="field-label">Référent — nom</label>
+          <input className="ubq-input" value={form.referentName} onChange={(e) => set("referentName", e.target.value)} />
+          <label className="field-label">Référent — téléphone</label>
+          <input className="ubq-input" value={form.referentPhone} onChange={(e) => set("referentPhone", e.target.value)} />
+          <label className="field-label">Référent — email</label>
+          <input className="ubq-input" value={form.referentEmail} onChange={(e) => set("referentEmail", e.target.value)} />
+        </div>
+        <div>
+          <label className="field-label">Comptabilité — nom</label>
+          <input className="ubq-input" value={form.accountingName} onChange={(e) => set("accountingName", e.target.value)} />
+          <label className="field-label">Comptabilité — téléphone</label>
+          <input className="ubq-input" value={form.accountingPhone} onChange={(e) => set("accountingPhone", e.target.value)} />
+          <label className="field-label">Comptabilité — email</label>
+          <input className="ubq-input" value={form.accountingEmail} onChange={(e) => set("accountingEmail", e.target.value)} />
+        </div>
+      </div>
+
+      <div className="two-col" style={{ marginTop: 16 }}>
+        <div>
+          <label className="field-label">Mode de règlement</label>
+          <select className="ubq-select" value={form.paymentMethodId} onChange={(e) => onPaymentMethodChange(e.target.value)}>
+            <option value="">— Sélectionner —</option>
+            {paymentMethods.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+          </select>
+          <label className="field-label">Délai de règlement (jours après facture)</label>
+          <input className="ubq-input" type="number" value={form.paymentDays} onChange={(e) => set("paymentDays", e.target.value)} />
+        </div>
+        <div>
+          <label className="field-label">RIB / IBAN (si prélèvement)</label>
+          <input className="ubq-input" value={form.rib} onChange={(e) => set("rib", e.target.value)} />
+          <label className="field-label" style={{ marginTop: 12 }}>Bons de livraison</label>
+          <label className="check-inline" style={{ marginTop: 6 }}>
+            <input type="checkbox" checked={form.blShowPrices} onChange={(e) => set("blShowPrices", e.target.checked)} /> Afficher les tarifs sur les bons de livraison envoyés à ce client
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formToApiBody(form) {
+  return {
+    name: form.name.trim(), email: form.email.trim(), address: form.address.trim(),
+    billingAddress: form.sameAsDelivery ? form.address.trim() : form.billingAddress.trim(),
+    categoryId: form.categoryId || null, siret: form.siret.trim(),
+    referentName: form.referentName.trim(), referentPhone: form.referentPhone.trim(), referentEmail: form.referentEmail.trim(),
+    accountingName: form.accountingName.trim(), accountingPhone: form.accountingPhone.trim(), accountingEmail: form.accountingEmail.trim(),
+    paymentMethodId: form.paymentMethodId || null, paymentDays: form.paymentDays === "" ? null : Number(form.paymentDays),
+    rib: form.rib.trim(), blShowPrices: form.blShowPrices,
+    emails: form.emails.filter((e) => e.email.trim()),
+  };
+}
+
+function clientToForm(c) {
+  return {
+    name: c.name || "", email: c.email || "", address: c.address || "", billingAddress: c.billingAddress || "",
+    sameAsDelivery: (c.billingAddress || "") === (c.address || ""), categoryId: c.categoryId || "",
+    siret: c.siret || "", referentName: c.referentName || "", referentPhone: c.referentPhone || "", referentEmail: c.referentEmail || "",
+    accountingName: c.accountingName || "", accountingPhone: c.accountingPhone || "", accountingEmail: c.accountingEmail || "",
+    paymentMethodId: c.paymentMethodId || "", paymentDays: c.paymentDays ?? "", rib: c.rib || "",
+    blShowPrices: c.blShowPrices !== false, emails: c.emails || [],
+  };
+}
+
+function ClientModal({ initial, categories, paymentMethods, onClose, onSaved, notify }) {
+  const [form, setForm] = useState(initial ? clientToForm(initial) : emptyClientForm());
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (!form.name.trim()) { notify("Le nom du client est obligatoire."); return; }
+    if (!form.email.trim()) { notify("L'email de connexion est obligatoire."); return; }
+    setSaving(true);
+    try {
+      const body = formToApiBody(form);
+      if (initial) {
+        await api.patchClient(initial.id, body);
+        notify("Fiche client mise à jour.");
+      } else {
+        const res = await api.addClient(body);
+        notify(`Client ${res.client_number || ""} ajouté — mot de passe espace client : ${res.temporaryPassword}`);
+      }
+      onSaved();
+    } catch (err) { notify(`Erreur : ${err.message}`); }
+    setSaving(false);
+  }
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-card" style={{ maxWidth: 720 }}>
+        <div className="row-between">
+          <h3 className="card-title" style={{ marginBottom: 0 }}>{initial ? `Modifier ${initial.name}` : "Nouveau client"}</h3>
+          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        </div>
+        <ClientFieldsForm form={form} setForm={setForm} categories={categories} paymentMethods={paymentMethods} loginEmailEditable={!initial} />
+        <button className="btn btn-moss" disabled={saving} onClick={save} style={{ marginTop: 18, width: "100%" }}>
+          {saving ? <Loader2 size={16} className="spin" /> : <Check size={16} />} Enregistrer
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SimpleListManager({ title, items, onAdd, onEdit, onDelete, extraField }) {
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [extra, setExtra] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editExtra, setEditExtra] = useState("");
+
+  return (
+    <div className="ubq-card" style={{ marginBottom: 16 }}>
+      <div className="row-between">
+        <h3 className="card-title" style={{ marginBottom: 0 }}>{title}</h3>
+        <button className="btn btn-steel btn-sm" onClick={() => setAdding((a) => !a)}><Plus size={14} /> Ajouter</button>
+      </div>
+      {adding && (
+        <div className="add-client-form">
+          <input className="ubq-input" placeholder="Nom" value={name} onChange={(e) => setName(e.target.value)} />
+          {extraField && <input className="ubq-input mono" style={{ maxWidth: 140 }} placeholder={extraField.placeholder} type="number" value={extra} onChange={(e) => setExtra(e.target.value)} />}
+          <button className="btn btn-moss btn-sm" onClick={() => { onAdd(name, extra); setName(""); setExtra(""); setAdding(false); }}><Check size={14} /></button>
+        </div>
+      )}
+      <div className="pending-list" style={{ marginTop: adding ? 12 : 0 }}>
+        {items.map((it) => (
+          <div className="pending-row" key={it.id}>
+            {editingId === it.id ? (
+              <>
+                <input className="ubq-input" style={{ maxWidth: 220 }} value={editName} onChange={(e) => setEditName(e.target.value)} />
+                {extraField && <input className="ubq-input mono" style={{ maxWidth: 100 }} type="number" value={editExtra} onChange={(e) => setEditExtra(e.target.value)} />}
+                <button className="icon-btn" onClick={() => { onEdit(it.id, editName, editExtra); setEditingId(null); }}><Check size={14} /></button>
+                <button className="icon-btn" onClick={() => setEditingId(null)}><X size={14} /></button>
+              </>
+            ) : (
+              <>
+                <span style={{ flex: 1 }}>{it.name}{extraField && <span className="muted"> — {it[extraField.key]} {extraField.suffix}</span>}</span>
+                <button className="icon-btn" onClick={() => { setEditingId(it.id); setEditName(it.name); setEditExtra(String(it[extraField?.key] || "")); }}><Pencil size={14} /></button>
+                <button className="icon-btn" onClick={() => onDelete(it.id)}><Trash2 size={14} /></button>
+              </>
+            )}
+          </div>
+        ))}
+        {items.length === 0 && <div className="term-muted small">Aucun élément.</div>}
+      </div>
+    </div>
+  );
+}
+
+function ProspectsPanel({ notify, onApproved }) {
+  const [prospects, setProspects] = useState([]);
+  const [inviteUrl, setInviteUrl] = useState("");
+
+  const load = useCallback(async () => {
+    try { setProspects(await api.getProspects()); } catch (err) { notify(`Erreur : ${err.message}`); }
+  }, [notify]);
+  useEffect(() => { load(); }, [load]);
+
+  async function invite() {
+    try { const res = await api.inviteProspect(); setInviteUrl(res.url); load(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+  async function approve(p) {
+    try { const res = await api.approveProspect(p.id); notify(`Client ${res.client.client_number} créé — mot de passe : ${res.temporaryPassword}`); load(); onApproved(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+  async function reject(p) {
+    try { await api.rejectProspect(p.id); load(); } catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  const statusLabel = { pending: "En attente de saisie", submitted: "À valider", approved: "Approuvé", rejected: "Refusé" };
+  const relevant = prospects.filter((p) => p.status !== "approved" && p.status !== "rejected");
+
+  return (
+    <div className="ubq-card" style={{ marginBottom: 16 }}>
+      <div className="row-between">
+        <h3 className="card-title" style={{ marginBottom: 0 }}>Prospects — formulaire à compléter</h3>
+        <button className="btn btn-steel btn-sm" onClick={invite}><Plus size={14} /> Générer un lien</button>
+      </div>
+      {inviteUrl && (
+        <div className="hint" style={{ marginTop: 10 }}>
+          Lien à envoyer au prospect : <span className="mono">{inviteUrl}</span>
+          <button className="btn-link" style={{ marginLeft: 8 }} onClick={() => { navigator.clipboard?.writeText(inviteUrl); notify("Lien copié."); }}>copier</button>
+        </div>
+      )}
+      <div className="pending-list" style={{ marginTop: 12 }}>
+        {relevant.map((p) => (
+          <div className="pending-row" key={p.id}>
+            <span style={{ flex: 1 }}>{p.data?.name || "(pas encore rempli)"}</span>
+            <span className="pill pill-steel">{statusLabel[p.status]}</span>
+            {p.status === "submitted" && (<>
+              <button className="btn btn-moss btn-sm" onClick={() => approve(p)}><Check size={13} /> Approuver</button>
+              <button className="icon-btn" onClick={() => reject(p)}><X size={14} /></button>
+            </>)}
+          </div>
+        ))}
+        {relevant.length === 0 && <div className="term-muted small">Aucun prospect en cours.</div>}
+      </div>
+    </div>
+  );
+}
+
+function Clients({ db, refresh, notify }) {
+  const [categories, setCategories] = useState([]);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [modal, setModal] = useState(null); // null | 'new' | client object
+
+  const loadLists = useCallback(async () => {
+    try {
+      const [cats, methods] = await Promise.all([api.getClientCategories(), api.getPaymentMethods()]);
+      setCategories(cats); setPaymentMethods(methods);
+    } catch (err) { notify(`Erreur : ${err.message}`); }
+  }, [notify]);
+  useEffect(() => { loadLists(); }, [loadLists]);
+
   async function resetPassword(clientId) {
     try { const res = await api.resetClientPassword(clientId); notify(`Nouveau mot de passe : ${res.temporaryPassword}`); }
     catch (err) { notify(`Erreur : ${err.message}`); }
@@ -692,20 +971,15 @@ function Clients({ db, refresh, notify }) {
   async function saveSettings(field, value) {
     try { await api.patchSettings({ [field]: value }); refresh(); } catch (err) { notify(`Erreur : ${err.message}`); }
   }
+  const categoryName = (id) => categories.find((c) => c.id === id)?.name;
 
   return (
     <div>
-      <div className="ubq-card" style={{ marginBottom: 16 }}>
-        <div className="row-between"><h3 className="card-title" style={{ marginBottom: 0 }}>Clients</h3><button className="btn btn-steel btn-sm" onClick={() => setAdding((a) => !a)}><Plus size={14} /> Ajouter un client</button></div>
-        {adding && (
-          <form onSubmit={addClient} className="add-client-form">
-            <input className="ubq-input" placeholder="Nom du client" value={name} onChange={(e) => setName(e.target.value)} />
-            <input className="ubq-input" placeholder="Adresse" value={address} onChange={(e) => setAddress(e.target.value)} />
-            <input className="ubq-input" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <button className="btn btn-moss btn-sm" type="submit"><Check size={14} /> Enregistrer</button>
-          </form>
-        )}
+      <div className="row-between" style={{ marginBottom: 14 }}>
+        <h3 className="card-title" style={{ marginBottom: 0 }}>Clients</h3>
+        <button className="btn btn-steel btn-sm" onClick={() => setModal("new")}><Plus size={14} /> Ajouter un client</button>
       </div>
+
       {db.clients.map((c) => {
         const clientItems = db.items.filter((i) => i.clientId === c.id);
         const enLavage = clientItems.filter((i) => i.status === "recu").length;
@@ -714,9 +988,16 @@ function Clients({ db, refresh, notify }) {
           <div className="ubq-card" key={c.id} style={{ marginBottom: 12 }}>
             <div className="row-between">
               <div>
-                <div className="client-name"><Building2 size={16} style={{ opacity: 0.6 }} /> {c.name}</div>
+                <div className="client-name">
+                  <Building2 size={16} style={{ opacity: 0.6 }} /> {c.name}
+                  <span className="mono muted small">{c.clientNumber}</span>
+                  {categoryName(c.categoryId) && <span className="pill pill-steel">{categoryName(c.categoryId)}</span>}
+                </div>
                 <div className="muted" style={{ fontSize: 13 }}>{c.address} · {c.email}</div>
-                <button className="btn-link" style={{ marginTop: 6 }} onClick={() => resetPassword(c.id)}><Lock size={11} style={{ marginRight: 4, verticalAlign: -1 }} />Réinitialiser le mot de passe espace client</button>
+                <div className="actions-row" style={{ justifyContent: "flex-start", marginTop: 6, gap: 14 }}>
+                  <button className="btn-link" onClick={() => setModal(c)}><Pencil size={11} style={{ marginRight: 4, verticalAlign: -1 }} />Modifier la fiche</button>
+                  <button className="btn-link" onClick={() => resetPassword(c.id)}><Lock size={11} style={{ marginRight: 4, verticalAlign: -1 }} />Réinitialiser le mot de passe</button>
+                </div>
               </div>
               <div style={{ textAlign: "right" }}>
                 <div className="muted" style={{ fontSize: 12 }}>{aFacturer.length} bon(s) à facturer · {enLavage} en lavage</div>
@@ -725,12 +1006,26 @@ function Clients({ db, refresh, notify }) {
           </div>
         );
       })}
-      <div className="ubq-card" style={{ marginBottom: 16 }}>
-        <div className="row-between">
-          <h3 className="card-title" style={{ marginBottom: 0 }}>Tarifs</h3>
-          <span className="muted small">Gérés désormais dans l'onglet "Articles".</span>
-        </div>
-      </div>
+
+      <ProspectsPanel notify={notify} onApproved={refresh} />
+
+      <SimpleListManager
+        title="Catégories de clients"
+        items={categories}
+        onAdd={async (name) => { if (!name.trim()) return; try { await api.addClientCategory({ name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+        onEdit={async (id, name) => { try { await api.patchClientCategory(id, { name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+        onDelete={async (id) => { try { await api.deleteClientCategory(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+      />
+
+      <SimpleListManager
+        title="Modes de règlement"
+        items={paymentMethods}
+        extraField={{ key: "default_days", suffix: "jours", placeholder: "Jours" }}
+        onAdd={async (name, days) => { if (!name.trim()) return; try { await api.addPaymentMethod({ name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+        onEdit={async (id, name, days) => { try { await api.patchPaymentMethod(id, { name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+        onDelete={async (id) => { try { await api.deletePaymentMethod(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+      />
+
       <div className="ubq-card">
         <h3 className="card-title">Coordonnées sur les documents (bons / factures)</h3>
         <div className="two-col">
@@ -748,6 +1043,64 @@ function Clients({ db, refresh, notify }) {
             <label className="field-label">Taux de TVA (%)</label><input className="ubq-input" type="number" defaultValue={db.settings.tvaRate} onBlur={(e) => saveSettings("tvaRate", parseFloat(e.target.value) || 0)} />
             <label className="field-label">Délai de paiement (jours)</label><input className="ubq-input" type="number" defaultValue={db.settings.paymentTermsDays} onBlur={(e) => saveSettings("paymentTermsDays", parseInt(e.target.value) || 30)} />
           </div>
+        </div>
+      </div>
+
+      {modal && (
+        <ClientModal
+          initial={modal === "new" ? null : modal}
+          categories={categories}
+          paymentMethods={paymentMethods}
+          notify={notify}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); refresh(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Formulaire prospect (page publique, sans connexion)                 */
+/* ------------------------------------------------------------------ */
+
+function ProspectForm({ token }) {
+  const [state, setState] = useState(null); // {status, categories, paymentMethods}
+  const [form, setForm] = useState(emptyClientForm());
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api.getProspectPublic(token).then((res) => setState(res)).catch((err) => setError(err.message));
+  }, [token]);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!form.name.trim() || !form.email.trim()) { setError("Le nom et l'email sont obligatoires."); return; }
+    try {
+      await api.submitProspectPublic(token, formToApiBody(form));
+      setSubmitted(true);
+    } catch (err) { setError(err.message); }
+  }
+
+  return (
+    <div className="ubq-root">
+      <style>{CSS}</style>
+      <div className="portal-login" style={{ alignItems: "flex-start", paddingTop: 40 }}>
+        <div className="ubq-card" style={{ maxWidth: 720, width: "100%" }}>
+          <h2 style={{ fontFamily: "'Space Grotesk',sans-serif" }}>Formulaire nouveau client</h2>
+          {!state && !error && <div className="term-muted">Chargement…</div>}
+          {error && <div className="portal-error">{error}</div>}
+          {state && state.status !== "pending" && (
+            <div className="term-muted">Ce formulaire a déjà été soumis, merci — vous serez contacté(e) prochainement.</div>
+          )}
+          {state && state.status === "pending" && !submitted && (
+            <form onSubmit={submit}>
+              <ClientFieldsForm form={form} setForm={setForm} categories={state.categories} paymentMethods={state.paymentMethods} />
+              <button className="btn btn-moss" type="submit" style={{ marginTop: 18, width: "100%" }}><Check size={16} /> Envoyer mes informations</button>
+            </form>
+          )}
+          {submitted && <div className="pill pill-moss" style={{ fontSize: 14, padding: "8px 16px" }}>Merci, votre formulaire a bien été envoyé.</div>}
         </div>
       </div>
     </div>
@@ -901,6 +1254,9 @@ const NAV = [
 ];
 
 export default function App() {
+  const prospectToken = window.location.pathname.match(/^\/prospect\/([^/]+)/)?.[1];
+  if (prospectToken) return <ProspectForm token={prospectToken} />;
+
   const [role, setRole] = useState(() => localStorage.getItem("tracalinge_role") || null);
   const [clientAuth, setClientAuth] = useState(() => { try { return JSON.parse(localStorage.getItem("tracalinge_client")); } catch { return null; } });
   const [tab, setTab] = useState("dashboard");
@@ -1085,7 +1441,7 @@ const CSS = `
 .pill-amber { background:var(--amber-soft); color:var(--amber); } .pill-moss { background:var(--moss-soft); color:var(--moss); }
 .ubq-table { width:100%; border-collapse:collapse; font-size:13.5px; } .ubq-table th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-500); padding:6px 8px; border-bottom:1px solid var(--line); }
 .ubq-table td { padding:9px 8px; border-bottom:1px solid var(--line); } .ubq-table tr:last-child td { border-bottom:none; }
-.row-between { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; } .client-name { display:flex; align-items:center; gap:8px; font-weight:600; font-size:15px; }
+.row-between { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; } .client-name { display:flex; align-items:center; gap:8px; font-weight:600; font-size:15px; flex-wrap:wrap; }
 .add-client-form { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; } .add-client-form input { flex:1; min-width:160px; }
 .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--graphite-900); color:#fff; padding:12px 20px; border-radius:8px; font-size:14px; box-shadow:0 8px 24px rgba(0,0,0,.25); z-index:50; max-width:80vw; }
 .modal-overlay { position:fixed; inset:0; background:rgba(15,30,45,.55); display:flex; align-items:center; justify-content:center; z-index:60; padding:20px; }
@@ -1103,6 +1459,10 @@ const CSS = `
 .sheet-totals-final { border-top:2px solid var(--graphite-900); border-bottom:none; margin-top:4px; padding-top:10px; font-weight:700; font-size:17px; font-family:'Space Grotesk',sans-serif; }
 .sheet-footer { margin-top:26px; padding-top:14px; border-top:1px solid var(--line); line-height:1.6; }
 .two-col { display:grid; grid-template-columns:1fr 1fr; gap:24px; } @media (max-width:700px){ .two-col { grid-template-columns:1fr; } .sheet-parties { grid-template-columns:1fr; } }
+.email-row { display:flex; align-items:center; gap:10px; padding:8px 2px; border-bottom:1px dashed var(--line); flex-wrap:wrap; }
+.email-row input[type="text"], .email-row .ubq-input { flex:1; min-width:180px; }
+.check-inline { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-500); white-space:nowrap; }
+.check-inline input { margin:0; }
 .portal-root { background:var(--paper); } .portal-login { width:100%; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
 .portal-error { color:var(--amber); font-size:13px; margin-top:8px; } .portal-wrap { width:100%; }
 .portal-top { display:flex; align-items:center; justify-content:space-between; padding:20px 28px; border-bottom:1px solid var(--line); background:var(--surface); }
