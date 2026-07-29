@@ -60,6 +60,11 @@ export const api = {
   patchPaymentMethod: (id, body) => request(`/api/payment-methods/${id}`, { method: "PATCH", body }),
   deletePaymentMethod: (id) => request(`/api/payment-methods/${id}`, { method: "DELETE" }),
 
+  getClientLinenTypes: (clientId) => request(`/api/clients/${clientId}/linen-types`),
+  setClientLinenType: (clientId, typeId, body) => request(`/api/clients/${clientId}/linen-types/${typeId}`, { method: "PUT", body }),
+  resetClientLinenType: (clientId, typeId) => request(`/api/clients/${clientId}/linen-types/${typeId}`, { method: "DELETE" }),
+  bulkIncreaseClientPrices: (clientId, percent) => request(`/api/clients/${clientId}/linen-types/bulk-increase`, { method: "POST", body: { percent } }),
+
   inviteProspect: () => request("/api/staff/prospects/invite", { method: "POST" }),
   getProspects: () => request("/api/staff/prospects"),
   approveProspect: (id) => request(`/api/staff/prospects/${id}/approve`, { method: "POST" }),
