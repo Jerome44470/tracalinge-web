@@ -814,7 +814,7 @@ function clientToForm(c) {
   };
 }
 
-function ClientModal({ initial, categories, paymentMethods, onClose, onSaved, notify }) {
+function ClientInlineForm({ initial, categories, paymentMethods, onClose, onSaved, notify }) {
   const [form, setForm] = useState(initial ? clientToForm(initial) : emptyClientForm());
   const [saving, setSaving] = useState(false);
 
@@ -837,17 +837,15 @@ function ClientModal({ initial, categories, paymentMethods, onClose, onSaved, no
   }
 
   return (
-    <div className="modal-overlay">
-      <div className="modal-card" style={{ maxWidth: 720 }}>
-        <div className="row-between">
-          <h3 className="card-title" style={{ marginBottom: 0 }}>{initial ? `Modifier ${initial.name}` : "Nouveau client"}</h3>
-          <button className="icon-btn" onClick={onClose}><X size={16} /></button>
-        </div>
-        <ClientFieldsForm form={form} setForm={setForm} categories={categories} paymentMethods={paymentMethods} loginEmailEditable={!initial} />
-        <button className="btn btn-moss" disabled={saving} onClick={save} style={{ marginTop: 18, width: "100%" }}>
-          {saving ? <Loader2 size={16} className="spin" /> : <Check size={16} />} Enregistrer
-        </button>
+    <div className="ubq-card" style={{ marginBottom: 16 }}>
+      <div className="row-between">
+        <h3 className="card-title" style={{ marginBottom: 0 }}>{initial ? `Modifier ${initial.name}` : "Nouveau client"}</h3>
+        <button className="icon-btn" onClick={onClose}><X size={16} /></button>
       </div>
+      <ClientFieldsForm form={form} setForm={setForm} categories={categories} paymentMethods={paymentMethods} loginEmailEditable={!initial} />
+      <button className="btn btn-moss" disabled={saving} onClick={save} style={{ marginTop: 18, width: "100%" }}>
+        {saving ? <Loader2 size={16} className="spin" /> : <Check size={16} />} Enregistrer
+      </button>
     </div>
   );
 }
@@ -983,6 +981,7 @@ function Clients({ db, refresh, notify }) {
   const [categories, setCategories] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [modal, setModal] = useState(null); // null | 'new' | client object
+  const [sortBy, setSortBy] = useState("name"); // 'name' | 'number' | 'category'
 
   const loadLists = useCallback(async () => {
     try {
@@ -996,19 +995,30 @@ function Clients({ db, refresh, notify }) {
     try { const res = await api.resetClientPassword(clientId); notify(`Nouveau mot de passe : ${res.temporaryPassword}`); }
     catch (err) { notify(`Erreur : ${err.message}`); }
   }
-  async function saveSettings(field, value) {
-    try { await api.patchSettings({ [field]: value }); refresh(); } catch (err) { notify(`Erreur : ${err.message}`); }
-  }
-  const categoryName = (id) => categories.find((c) => c.id === id)?.name;
+  const categoryName = (id) => categories.find((c) => c.id === id)?.name || "";
+
+  const sortedClients = [...db.clients].sort((a, b) => {
+    if (sortBy === "number") return (a.clientNumber || "").localeCompare(b.clientNumber || "");
+    if (sortBy === "category") return categoryName(a.categoryId).localeCompare(categoryName(b.categoryId)) || a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name);
+  });
 
   return (
     <div>
       <div className="row-between" style={{ marginBottom: 14 }}>
         <h3 className="card-title" style={{ marginBottom: 0 }}>Clients</h3>
-        <button className="btn btn-steel btn-sm" onClick={() => setModal("new")}><Plus size={14} /> Ajouter un client</button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span className="muted small">Trier par</span>
+          <div className="seg">
+            <button className={`seg-btn ${sortBy === "name" ? "seg-active" : ""}`} onClick={() => setSortBy("name")}>Alphabétique</button>
+            <button className={`seg-btn ${sortBy === "number" ? "seg-active" : ""}`} onClick={() => setSortBy("number")}>N° client</button>
+            <button className={`seg-btn ${sortBy === "category" ? "seg-active" : ""}`} onClick={() => setSortBy("category")}>Catégorie</button>
+          </div>
+          <button className="btn btn-steel btn-sm" onClick={() => setModal("new")}><Plus size={14} /> Créer un client</button>
+        </div>
       </div>
 
-      {db.clients.map((c) => {
+      {sortedClients.map((c) => {
         const clientItems = db.items.filter((i) => i.clientId === c.id);
         const enLavage = clientItems.filter((i) => i.status === "recu").length;
         const aFacturer = db.deliveryNotes.filter((n) => n.clientId === c.id && n.status === "envoye" && !n.invoiced);
@@ -1034,6 +1044,18 @@ function Clients({ db, refresh, notify }) {
           </div>
         );
       })}
+      {sortedClients.length === 0 && <div className="ubq-card term-muted" style={{ marginBottom: 16 }}>Aucun client pour l'instant.</div>}
+
+      {modal && (
+        <ClientInlineForm
+          initial={modal === "new" ? null : modal}
+          categories={categories}
+          paymentMethods={paymentMethods}
+          notify={notify}
+          onClose={() => setModal(null)}
+          onSaved={() => { setModal(null); refresh(); }}
+        />
+      )}
 
       <ProspectsPanel notify={notify} onApproved={refresh} />
 
@@ -1053,24 +1075,6 @@ function Clients({ db, refresh, notify }) {
         onEdit={async (id, name, days) => { try { await api.patchPaymentMethod(id, { name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
         onDelete={async (id) => { try { await api.deletePaymentMethod(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
       />
-
-      <div className="ubq-card">
-        <div className="row-between">
-          <h3 className="card-title" style={{ marginBottom: 0 }}>Coordonnées de l'entreprise</h3>
-          <span className="muted small">Gérées désormais dans l'onglet "{db.settings.companyName || "Mon entreprise"}".</span>
-        </div>
-      </div>
-
-      {modal && (
-        <ClientModal
-          initial={modal === "new" ? null : modal}
-          categories={categories}
-          paymentMethods={paymentMethods}
-          notify={notify}
-          onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); refresh(); }}
-        />
-      )}
     </div>
   );
 }
