@@ -814,6 +814,62 @@ function clientToForm(c) {
   };
 }
 
+function ClientArticlesPanel({ clientId, notify }) {
+  const [rows, setRows] = useState(null);
+  const [percent, setPercent] = useState("");
+
+  const load = useCallback(async () => {
+    try { setRows(await api.getClientLinenTypes(clientId)); } catch (err) { notify(`Erreur : ${err.message}`); }
+  }, [clientId, notify]);
+  useEffect(() => { load(); }, [load]);
+
+  async function savePrice(typeId, price, included) {
+    try { await api.setClientLinenType(clientId, typeId, { price, included }); load(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+  async function reset(typeId) {
+    try { await api.resetClientLinenType(clientId, typeId); load(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+  async function bulkIncrease() {
+    if (percent === "" || isNaN(parseFloat(percent))) { notify("Indique un pourcentage valide."); return; }
+    try { await api.bulkIncreaseClientPrices(clientId, parseFloat(percent)); notify(`Tarifs augmentés de ${percent}%.`); setPercent(""); load(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  if (!rows) return <div className="term-muted" style={{ marginTop: 16 }}>Chargement des articles…</div>;
+
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div className="row-between">
+        <span className="field-label" style={{ margin: 0 }}>Articles et tarifs pour ce client</span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input className="ubq-input mono" style={{ width: 90 }} type="number" placeholder="%" value={percent} onChange={(e) => setPercent(e.target.value)} />
+          <button className="btn btn-steel btn-sm" onClick={bulkIncrease}>Augmenter tous les tarifs</button>
+        </div>
+      </div>
+      <table className="ubq-table" style={{ marginTop: 10 }}>
+        <thead><tr><th></th><th>Article</th><th>Tarif de base</th><th>Tarif client</th><th></th></tr></thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.typeId} style={r.included ? {} : { opacity: 0.5 }}>
+              <td><input type="checkbox" checked={r.included} onChange={(e) => savePrice(r.typeId, r.price, e.target.checked)} /></td>
+              <td>{r.name}</td>
+              <td className="mono muted">{fmtEUR(r.basePrice)}</td>
+              <td>
+                <input className="ubq-input mono" style={{ width: 100 }} type="number" step="0.01" min="0" value={r.price}
+                  onChange={(e) => setRows((rs) => rs.map((x) => (x.typeId === r.typeId ? { ...x, price: e.target.value } : x)))}
+                  onBlur={(e) => savePrice(r.typeId, parseFloat(e.target.value) || 0, r.included)} />
+              </td>
+              <td>{r.customized && <button className="btn-link" onClick={() => reset(r.typeId)}>rétablir le tarif de base</button>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function ClientInlineForm({ initial, categories, paymentMethods, onClose, onSaved, notify }) {
   const [form, setForm] = useState(initial ? clientToForm(initial) : emptyClientForm());
   const [saving, setSaving] = useState(false);
@@ -843,6 +899,8 @@ function ClientInlineForm({ initial, categories, paymentMethods, onClose, onSave
         <button className="icon-btn" onClick={onClose}><X size={16} /></button>
       </div>
       <ClientFieldsForm form={form} setForm={setForm} categories={categories} paymentMethods={paymentMethods} loginEmailEditable={!initial} />
+      {initial && <ClientArticlesPanel clientId={initial.id} notify={notify} />}
+      {!initial && <div className="hint" style={{ marginTop: 14 }}>Les articles et tarifs personnalisés se règlent une fois le client créé, depuis "Modifier la fiche".</div>}
       <button className="btn btn-moss" disabled={saving} onClick={save} style={{ marginTop: 18, width: "100%" }}>
         {saving ? <Loader2 size={16} className="spin" /> : <Check size={16} />} Enregistrer
       </button>
@@ -982,6 +1040,7 @@ function Clients({ db, refresh, notify }) {
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [modal, setModal] = useState(null); // null | 'new' | client object
   const [sortBy, setSortBy] = useState("name"); // 'name' | 'number' | 'category'
+  const [search, setSearch] = useState("");
 
   const loadLists = useCallback(async () => {
     try {
@@ -997,54 +1056,62 @@ function Clients({ db, refresh, notify }) {
   }
   const categoryName = (id) => categories.find((c) => c.id === id)?.name || "";
 
-  const sortedClients = [...db.clients].sort((a, b) => {
-    if (sortBy === "number") return (a.clientNumber || "").localeCompare(b.clientNumber || "");
-    if (sortBy === "category") return categoryName(a.categoryId).localeCompare(categoryName(b.categoryId)) || a.name.localeCompare(b.name);
-    return a.name.localeCompare(b.name);
+  const filtered = db.clients.filter((c) => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return c.name.toLowerCase().includes(q) || (c.clientNumber || "").toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q);
+  });
+  const sortedClients = [...filtered].sort((a, b) => {
+    if (sortBy === "number") return (a.clientNumber || "").localeCompare(b.clientNumber || "", "fr", { numeric: true });
+    if (sortBy === "category") return categoryName(a.categoryId).localeCompare(categoryName(b.categoryId), "fr") || a.name.localeCompare(b.name, "fr");
+    return a.name.localeCompare(b.name, "fr");
   });
 
   return (
     <div>
       <div className="row-between" style={{ marginBottom: 14 }}>
-        <h3 className="card-title" style={{ marginBottom: 0 }}>Clients</h3>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span className="muted small">Trier par</span>
-          <div className="seg">
-            <button className={`seg-btn ${sortBy === "name" ? "seg-active" : ""}`} onClick={() => setSortBy("name")}>Alphabétique</button>
-            <button className={`seg-btn ${sortBy === "number" ? "seg-active" : ""}`} onClick={() => setSortBy("number")}>N° client</button>
-            <button className={`seg-btn ${sortBy === "category" ? "seg-active" : ""}`} onClick={() => setSortBy("category")}>Catégorie</button>
-          </div>
-          <button className="btn btn-steel btn-sm" onClick={() => setModal("new")}><Plus size={14} /> Créer un client</button>
-        </div>
+        <h3 className="card-title" style={{ marginBottom: 0 }}>Clients ({db.clients.length})</h3>
+        <button className="btn btn-steel btn-sm" onClick={() => setModal("new")}><Plus size={14} /> Créer un client</button>
       </div>
 
-      {sortedClients.map((c) => {
-        const clientItems = db.items.filter((i) => i.clientId === c.id);
-        const enLavage = clientItems.filter((i) => i.status === "recu").length;
-        const aFacturer = db.deliveryNotes.filter((n) => n.clientId === c.id && n.status === "envoye" && !n.invoiced);
-        return (
-          <div className="ubq-card" key={c.id} style={{ marginBottom: 12 }}>
-            <div className="row-between">
-              <div>
-                <div className="client-name">
-                  <Building2 size={16} style={{ opacity: 0.6 }} /> {c.name}
-                  <span className="mono muted small">{c.clientNumber}</span>
-                  {categoryName(c.categoryId) && <span className="pill pill-steel">{categoryName(c.categoryId)}</span>}
-                </div>
-                <div className="muted" style={{ fontSize: 13 }}>{c.address} · {c.email}</div>
-                <div className="actions-row" style={{ justifyContent: "flex-start", marginTop: 6, gap: 14 }}>
-                  <button className="btn-link" onClick={() => setModal(c)}><Pencil size={11} style={{ marginRight: 4, verticalAlign: -1 }} />Modifier la fiche</button>
-                  <button className="btn-link" onClick={() => resetPassword(c.id)}><Lock size={11} style={{ marginRight: 4, verticalAlign: -1 }} />Réinitialiser le mot de passe</button>
-                </div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div className="muted" style={{ fontSize: 12 }}>{aFacturer.length} bon(s) à facturer · {enLavage} en lavage</div>
-              </div>
+      <div className="ubq-card" style={{ marginBottom: 16 }}>
+        <div className="row-between" style={{ flexWrap: "wrap", gap: 10 }}>
+          <input className="ubq-input" style={{ maxWidth: 320 }} placeholder="Rechercher (nom, n°, email)…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span className="muted small">Trier par</span>
+            <div className="seg">
+              <button className={`seg-btn ${sortBy === "name" ? "seg-active" : ""}`} onClick={() => setSortBy("name")}>Alphabétique</button>
+              <button className={`seg-btn ${sortBy === "number" ? "seg-active" : ""}`} onClick={() => setSortBy("number")}>N° client</button>
+              <button className={`seg-btn ${sortBy === "category" ? "seg-active" : ""}`} onClick={() => setSortBy("category")}>Catégorie</button>
             </div>
           </div>
-        );
-      })}
-      {sortedClients.length === 0 && <div className="ubq-card term-muted" style={{ marginBottom: 16 }}>Aucun client pour l'instant.</div>}
+        </div>
+
+        <table className="ubq-table" style={{ marginTop: 14 }}>
+          <thead><tr><th>N°</th><th>Nom</th><th>Catégorie</th><th>Email</th><th>À facturer</th><th></th></tr></thead>
+          <tbody>
+            {sortedClients.map((c) => {
+              const aFacturer = db.deliveryNotes.filter((n) => n.clientId === c.id && n.status === "envoye" && !n.invoiced);
+              return (
+                <tr key={c.id}>
+                  <td className="mono muted">{c.clientNumber}</td>
+                  <td style={{ fontWeight: 600 }}>{c.name}</td>
+                  <td>{categoryName(c.categoryId) && <span className="pill pill-steel">{categoryName(c.categoryId)}</span>}</td>
+                  <td className="muted">{c.email}</td>
+                  <td>{aFacturer.length}</td>
+                  <td>
+                    <div className="actions-row">
+                      <button className="icon-btn" title="Modifier la fiche" onClick={() => setModal(c)}><Pencil size={15} /></button>
+                      <button className="icon-btn" title="Réinitialiser le mot de passe" onClick={() => resetPassword(c.id)}><Lock size={15} /></button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {sortedClients.length === 0 && <tr><td colSpan={6} className="term-muted" style={{ padding: 14 }}>Aucun client ne correspond.</td></tr>}
+          </tbody>
+        </table>
+      </div>
 
       {modal && (
         <ClientInlineForm
