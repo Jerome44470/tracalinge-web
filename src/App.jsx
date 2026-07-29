@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   LayoutDashboard, PackageCheck, Truck, AlertTriangle, Building2, Radio, Plus, X, Check,
-  Loader2, FileText, Send, Pencil, Trash2, Printer, Lock, LogOut, Eye, Receipt, ArrowUp, ArrowDown, ShieldCheck, EyeOff, Tags,
+  Loader2, FileText, Send, Pencil, Trash2, Printer, Lock, LogOut, Eye, Receipt, ArrowUp, ArrowDown, ShieldCheck, EyeOff, Tags, Landmark,
 } from "lucide-react";
 import { api, setToken, getToken } from "./api.js";
 import { connectRealtime, onRealtime, disconnectRealtime } from "./realtime.js";
@@ -951,6 +951,34 @@ function ProspectsPanel({ notify, onApproved }) {
   );
 }
 
+function CompanySettings({ db, refresh, notify }) {
+  async function saveSettings(field, value) {
+    try { await api.patchSettings({ [field]: value }); refresh(); } catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  return (
+    <div className="ubq-card">
+      <h3 className="card-title">Coordonnées sur les documents (bons / factures)</h3>
+      <div className="two-col">
+        <div>
+          <label className="field-label">Nom de la blanchisserie</label><input className="ubq-input" defaultValue={db.settings.companyName} onBlur={(e) => saveSettings("companyName", e.target.value)} />
+          <label className="field-label">Forme juridique</label><input className="ubq-input" defaultValue={db.settings.legalForm} onBlur={(e) => saveSettings("legalForm", e.target.value)} />
+          <label className="field-label">Capital social</label><input className="ubq-input" defaultValue={db.settings.capitalSocial} onBlur={(e) => saveSettings("capitalSocial", e.target.value)} />
+          <label className="field-label">Adresse du siège</label><input className="ubq-input" defaultValue={db.settings.companyAddress} onBlur={(e) => saveSettings("companyAddress", e.target.value)} />
+          <label className="field-label">Email</label><input className="ubq-input" defaultValue={db.settings.companyEmail} onBlur={(e) => saveSettings("companyEmail", e.target.value)} />
+        </div>
+        <div>
+          <label className="field-label">SIRET</label><input className="ubq-input" defaultValue={db.settings.siret} onBlur={(e) => saveSettings("siret", e.target.value)} />
+          <label className="field-label">N° TVA intracommunautaire</label><input className="ubq-input" defaultValue={db.settings.tvaIntra} onBlur={(e) => saveSettings("tvaIntra", e.target.value)} />
+          <label className="field-label">RCS</label><input className="ubq-input" defaultValue={db.settings.rcs} onBlur={(e) => saveSettings("rcs", e.target.value)} />
+          <label className="field-label">Taux de TVA (%)</label><input className="ubq-input" type="number" defaultValue={db.settings.tvaRate} onBlur={(e) => saveSettings("tvaRate", parseFloat(e.target.value) || 0)} />
+          <label className="field-label">Délai de paiement (jours)</label><input className="ubq-input" type="number" defaultValue={db.settings.paymentTermsDays} onBlur={(e) => saveSettings("paymentTermsDays", parseInt(e.target.value) || 30)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Clients({ db, refresh, notify }) {
   const [categories, setCategories] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
@@ -1027,22 +1055,9 @@ function Clients({ db, refresh, notify }) {
       />
 
       <div className="ubq-card">
-        <h3 className="card-title">Coordonnées sur les documents (bons / factures)</h3>
-        <div className="two-col">
-          <div>
-            <label className="field-label">Nom de la blanchisserie</label><input className="ubq-input" defaultValue={db.settings.companyName} onBlur={(e) => saveSettings("companyName", e.target.value)} />
-            <label className="field-label">Forme juridique</label><input className="ubq-input" defaultValue={db.settings.legalForm} onBlur={(e) => saveSettings("legalForm", e.target.value)} />
-            <label className="field-label">Capital social</label><input className="ubq-input" defaultValue={db.settings.capitalSocial} onBlur={(e) => saveSettings("capitalSocial", e.target.value)} />
-            <label className="field-label">Adresse du siège</label><input className="ubq-input" defaultValue={db.settings.companyAddress} onBlur={(e) => saveSettings("companyAddress", e.target.value)} />
-            <label className="field-label">Email</label><input className="ubq-input" defaultValue={db.settings.companyEmail} onBlur={(e) => saveSettings("companyEmail", e.target.value)} />
-          </div>
-          <div>
-            <label className="field-label">SIRET</label><input className="ubq-input" defaultValue={db.settings.siret} onBlur={(e) => saveSettings("siret", e.target.value)} />
-            <label className="field-label">N° TVA intracommunautaire</label><input className="ubq-input" defaultValue={db.settings.tvaIntra} onBlur={(e) => saveSettings("tvaIntra", e.target.value)} />
-            <label className="field-label">RCS</label><input className="ubq-input" defaultValue={db.settings.rcs} onBlur={(e) => saveSettings("rcs", e.target.value)} />
-            <label className="field-label">Taux de TVA (%)</label><input className="ubq-input" type="number" defaultValue={db.settings.tvaRate} onBlur={(e) => saveSettings("tvaRate", parseFloat(e.target.value) || 0)} />
-            <label className="field-label">Délai de paiement (jours)</label><input className="ubq-input" type="number" defaultValue={db.settings.paymentTermsDays} onBlur={(e) => saveSettings("paymentTermsDays", parseInt(e.target.value) || 30)} />
-          </div>
+        <div className="row-between">
+          <h3 className="card-title" style={{ marginBottom: 0 }}>Coordonnées de l'entreprise</h3>
+          <span className="muted small">Gérées désormais dans l'onglet "{db.settings.companyName || "Mon entreprise"}".</span>
         </div>
       </div>
 
@@ -1251,6 +1266,7 @@ const NAV = [
   { id: "perdu", label: "Linge perdu", icon: AlertTriangle },
   { id: "articles", label: "Articles", icon: Tags },
   { id: "clients", label: "Clients", icon: Building2 },
+  { id: "company", label: "Mon entreprise", icon: Landmark },
 ];
 
 export default function App() {
@@ -1334,8 +1350,8 @@ export default function App() {
       <style>{CSS}</style>
       <aside className="sidebar no-print">
         <div className="brand"><Radio size={20} /><span>Traçalinge</span></div>
-        <nav>{NAV.map((n) => { const Icon = n.icon; return (
-          <button key={n.id} className={`nav-item ${tab === n.id ? "active" : ""}`} onClick={() => setTab(n.id)}><Icon size={17} /><span>{n.label}</span></button>
+        <nav>{NAV.map((n) => { const Icon = n.icon; const label = n.id === "company" ? (db.settings.companyName || n.label) : n.label; return (
+          <button key={n.id} className={`nav-item ${tab === n.id ? "active" : ""}`} onClick={() => setTab(n.id)}><Icon size={17} /><span>{label}</span></button>
         ); })}</nav>
         <button className="nav-item" onClick={() => setRole("client")}><Lock size={17} /><span>Espace client</span></button>
         <button className="nav-item" onClick={logoutStaff}><LogOut size={17} /><span>Déconnexion</span></button>
@@ -1343,7 +1359,7 @@ export default function App() {
       </aside>
       <main className="main">
         <header className="topbar no-print">
-          <h1>{NAV.find((n) => n.id === tab)?.label}</h1>
+          <h1>{tab === "company" ? (db.settings.companyName || "Mon entreprise") : NAV.find((n) => n.id === tab)?.label}</h1>
           <div className="muted mono" style={{ fontSize: 13 }}>{db.items.length} pièces suivies · {db.clients.length} clients</div>
         </header>
         <div className="content no-print">
@@ -1355,6 +1371,7 @@ export default function App() {
           {tab === "perdu" && <LingePerdu db={db} typeById={typeById} refresh={refresh} notify={notify} />}
           {tab === "articles" && <Articles db={db} me={me} refresh={refresh} notify={notify} />}
           {tab === "clients" && <Clients db={db} refresh={refresh} notify={notify} />}
+          {tab === "company" && <CompanySettings db={db} refresh={refresh} notify={notify} />}
         </div>
       </main>
       {toast && <div className="toast no-print">{toast}</div>}
