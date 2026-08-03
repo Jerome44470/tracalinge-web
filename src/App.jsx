@@ -1071,7 +1071,8 @@ function CompanySettings({ db, refresh, notify }) {
 function Clients({ db, refresh, notify }) {
   const [categories, setCategories] = useState([]);
   const [paymentMethods, setPaymentMethods] = useState([]);
-  const [modal, setModal] = useState(null); // null | 'new' | client object
+  const [subTab, setSubTab] = useState("list"); // 'prospects' | 'form' | 'list'
+  const [editingClient, setEditingClient] = useState(null); // null = nouveau client
   const [sortBy, setSortBy] = useState("name"); // 'name' | 'number' | 'category'
   const [search, setSearch] = useState("");
 
@@ -1089,6 +1090,9 @@ function Clients({ db, refresh, notify }) {
   }
   const categoryName = (id) => categories.find((c) => c.id === id)?.name || "";
 
+  function openCreate() { setEditingClient(null); setSubTab("form"); }
+  function openEdit(c) { setEditingClient(c); setSubTab("form"); }
+
   const filtered = db.clients.filter((c) => {
     if (!search.trim()) return false;
     const q = search.trim().toLowerCase();
@@ -1102,91 +1106,109 @@ function Clients({ db, refresh, notify }) {
     return a.name.localeCompare(b.name, "fr");
   });
 
+  const SUB_TABS = [
+    { id: "prospects", label: "Envoi lien prospect" },
+    { id: "form", label: editingClient ? `Modifier ${editingClient.name}` : "Création client" },
+    { id: "list", label: "Clients existants" },
+  ];
+
   return (
     <div>
-      <ProspectsPanel notify={notify} onApproved={refresh} />
-
-      <div className="row-between" style={{ marginBottom: 14 }}>
-        <h3 className="card-title" style={{ marginBottom: 0 }}>Clients ({db.clients.length})</h3>
-        <button className="btn btn-steel btn-sm" onClick={() => setModal("new")}><Plus size={14} /> Créer un client</button>
+      <div className="seg" style={{ marginBottom: 16, maxWidth: 620 }}>
+        {SUB_TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`seg-btn ${subTab === t.id ? "seg-active" : ""}`}
+            onClick={() => (t.id === "form" ? openCreate() : setSubTab(t.id))}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      <div className="ubq-card" style={{ marginBottom: 16 }}>
-        <div className="row-between" style={{ flexWrap: "wrap", gap: 10 }}>
-          <input
-            className="ubq-input"
-            style={{ maxWidth: 320 }}
-            placeholder={`Rechercher un client par ${sortBy === "number" ? "numéro" : sortBy === "category" ? "catégorie" : "nom"}…`}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span className="muted small">Rechercher par</span>
-            <div className="seg">
-              <button className={`seg-btn ${sortBy === "name" ? "seg-active" : ""}`} onClick={() => setSortBy("name")}>Nom</button>
-              <button className={`seg-btn ${sortBy === "number" ? "seg-active" : ""}`} onClick={() => setSortBy("number")}>N° client</button>
-              <button className={`seg-btn ${sortBy === "category" ? "seg-active" : ""}`} onClick={() => setSortBy("category")}>Catégorie</button>
-            </div>
-          </div>
-        </div>
+      {subTab === "prospects" && <ProspectsPanel notify={notify} onApproved={refresh} />}
 
-        {!search.trim() && <div className="term-muted small" style={{ marginTop: 12 }}>Tape un nom, un numéro ou une catégorie pour retrouver un client.</div>}
-
-        {search.trim() && (
-          <table className="ubq-table" style={{ marginTop: 14 }}>
-            <thead><tr><th>N°</th><th>Nom</th><th>Catégorie</th><th>Email</th><th>À facturer</th><th></th></tr></thead>
-            <tbody>
-              {sortedClients.map((c) => {
-                const aFacturer = db.deliveryNotes.filter((n) => n.clientId === c.id && n.status === "envoye" && !n.invoiced);
-                return (
-                  <tr key={c.id}>
-                    <td className="mono muted">{c.clientNumber}</td>
-                    <td style={{ fontWeight: 600 }}>{c.name}</td>
-                    <td>{categoryName(c.categoryId) && <span className="pill pill-steel">{categoryName(c.categoryId)}</span>}</td>
-                    <td className="muted">{c.email}</td>
-                    <td>{aFacturer.length}</td>
-                    <td>
-                      <div className="actions-row">
-                        <button className="icon-btn" title="Modifier la fiche" onClick={() => setModal(c)}><Pencil size={15} /></button>
-                        <button className="icon-btn" title="Réinitialiser le mot de passe" onClick={() => resetPassword(c.id)}><Lock size={15} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-              {sortedClients.length === 0 && <tr><td colSpan={6} className="term-muted" style={{ padding: 14 }}>Aucun client ne correspond.</td></tr>}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {modal && (
+      {subTab === "form" && (
         <ClientInlineForm
-          initial={modal === "new" ? null : modal}
+          key={editingClient?.id || "new"}
+          initial={editingClient}
           categories={categories}
           paymentMethods={paymentMethods}
           notify={notify}
-          onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); refresh(); }}
+          onClose={() => setSubTab("list")}
+          onSaved={() => { setSubTab("list"); setEditingClient(null); refresh(); }}
         />
       )}
 
-      <SimpleListManager
-        title="Catégories de clients"
-        items={categories}
-        onAdd={async (name) => { if (!name.trim()) return; try { await api.addClientCategory({ name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-        onEdit={async (id, name) => { try { await api.patchClientCategory(id, { name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-        onDelete={async (id) => { try { await api.deleteClientCategory(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-      />
+      {subTab === "list" && (
+        <>
+          <div className="ubq-card" style={{ marginBottom: 16 }}>
+            <div className="row-between" style={{ flexWrap: "wrap", gap: 10 }}>
+              <input
+                className="ubq-input"
+                style={{ maxWidth: 320 }}
+                placeholder={`Rechercher un client par ${sortBy === "number" ? "numéro" : sortBy === "category" ? "catégorie" : "nom"}…`}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span className="muted small">Rechercher par</span>
+                <div className="seg">
+                  <button className={`seg-btn ${sortBy === "name" ? "seg-active" : ""}`} onClick={() => setSortBy("name")}>Nom</button>
+                  <button className={`seg-btn ${sortBy === "number" ? "seg-active" : ""}`} onClick={() => setSortBy("number")}>N° client</button>
+                  <button className={`seg-btn ${sortBy === "category" ? "seg-active" : ""}`} onClick={() => setSortBy("category")}>Catégorie</button>
+                </div>
+              </div>
+            </div>
 
-      <SimpleListManager
-        title="Modes de règlement"
-        items={paymentMethods}
-        extraField={{ key: "default_days", suffix: "jours", placeholder: "Jours" }}
-        onAdd={async (name, days) => { if (!name.trim()) return; try { await api.addPaymentMethod({ name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-        onEdit={async (id, name, days) => { try { await api.patchPaymentMethod(id, { name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-        onDelete={async (id) => { try { await api.deletePaymentMethod(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-      />
+            {!search.trim() && <div className="term-muted small" style={{ marginTop: 12 }}>Tape un nom, un numéro ou une catégorie pour retrouver un client — ou utilise "Création client" pour en ajouter un nouveau.</div>}
+
+            {search.trim() && (
+              <table className="ubq-table" style={{ marginTop: 14 }}>
+                <thead><tr><th>N°</th><th>Nom</th><th>Catégorie</th><th>Email</th><th>À facturer</th><th></th></tr></thead>
+                <tbody>
+                  {sortedClients.map((c) => {
+                    const aFacturer = db.deliveryNotes.filter((n) => n.clientId === c.id && n.status === "envoye" && !n.invoiced);
+                    return (
+                      <tr key={c.id}>
+                        <td className="mono muted">{c.clientNumber}</td>
+                        <td style={{ fontWeight: 600 }}>{c.name}</td>
+                        <td>{categoryName(c.categoryId) && <span className="pill pill-steel">{categoryName(c.categoryId)}</span>}</td>
+                        <td className="muted">{c.email}</td>
+                        <td>{aFacturer.length}</td>
+                        <td>
+                          <div className="actions-row">
+                            <button className="icon-btn" title="Modifier la fiche" onClick={() => openEdit(c)}><Pencil size={15} /></button>
+                            <button className="icon-btn" title="Réinitialiser le mot de passe" onClick={() => resetPassword(c.id)}><Lock size={15} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {sortedClients.length === 0 && <tr><td colSpan={6} className="term-muted" style={{ padding: 14 }}>Aucun client ne correspond.</td></tr>}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <SimpleListManager
+            title="Catégories de clients"
+            items={categories}
+            onAdd={async (name) => { if (!name.trim()) return; try { await api.addClientCategory({ name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+            onEdit={async (id, name) => { try { await api.patchClientCategory(id, { name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+            onDelete={async (id) => { try { await api.deleteClientCategory(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+          />
+
+          <SimpleListManager
+            title="Modes de règlement"
+            items={paymentMethods}
+            extraField={{ key: "default_days", suffix: "jours", placeholder: "Jours" }}
+            onAdd={async (name, days) => { if (!name.trim()) return; try { await api.addPaymentMethod({ name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+            onEdit={async (id, name, days) => { try { await api.patchPaymentMethod(id, { name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+            onDelete={async (id) => { try { await api.deletePaymentMethod(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+          />
+        </>
+      )}
     </div>
   );
 }
