@@ -1041,29 +1041,59 @@ function ProspectsPanel({ notify, onApproved }) {
 }
 
 function CompanySettings({ db, refresh, notify }) {
+  const [categories, setCategories] = useState([]);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+
+  const loadLists = useCallback(async () => {
+    try {
+      const [cats, methods] = await Promise.all([api.getClientCategories(), api.getPaymentMethods()]);
+      setCategories(cats); setPaymentMethods(methods);
+    } catch (err) { notify(`Erreur : ${err.message}`); }
+  }, [notify]);
+  useEffect(() => { loadLists(); }, [loadLists]);
+
   async function saveSettings(field, value) {
     try { await api.patchSettings({ [field]: value }); refresh(); } catch (err) { notify(`Erreur : ${err.message}`); }
   }
 
   return (
-    <div className="ubq-card">
-      <h3 className="card-title">Coordonnées sur les documents (bons / factures)</h3>
-      <div className="two-col">
-        <div>
-          <label className="field-label">Nom de la blanchisserie</label><input className="ubq-input" defaultValue={db.settings.companyName} onBlur={(e) => saveSettings("companyName", e.target.value)} />
-          <label className="field-label">Forme juridique</label><input className="ubq-input" defaultValue={db.settings.legalForm} onBlur={(e) => saveSettings("legalForm", e.target.value)} />
-          <label className="field-label">Capital social</label><input className="ubq-input" defaultValue={db.settings.capitalSocial} onBlur={(e) => saveSettings("capitalSocial", e.target.value)} />
-          <label className="field-label">Adresse du siège</label><input className="ubq-input" defaultValue={db.settings.companyAddress} onBlur={(e) => saveSettings("companyAddress", e.target.value)} />
-          <label className="field-label">Email</label><input className="ubq-input" defaultValue={db.settings.companyEmail} onBlur={(e) => saveSettings("companyEmail", e.target.value)} />
-        </div>
-        <div>
-          <label className="field-label">SIRET</label><input className="ubq-input" defaultValue={db.settings.siret} onBlur={(e) => saveSettings("siret", e.target.value)} />
-          <label className="field-label">N° TVA intracommunautaire</label><input className="ubq-input" defaultValue={db.settings.tvaIntra} onBlur={(e) => saveSettings("tvaIntra", e.target.value)} />
-          <label className="field-label">RCS</label><input className="ubq-input" defaultValue={db.settings.rcs} onBlur={(e) => saveSettings("rcs", e.target.value)} />
-          <label className="field-label">Taux de TVA (%)</label><input className="ubq-input" type="number" defaultValue={db.settings.tvaRate} onBlur={(e) => saveSettings("tvaRate", parseFloat(e.target.value) || 0)} />
-          <label className="field-label">Délai de paiement (jours)</label><input className="ubq-input" type="number" defaultValue={db.settings.paymentTermsDays} onBlur={(e) => saveSettings("paymentTermsDays", parseInt(e.target.value) || 30)} />
+    <div>
+      <div className="ubq-card" style={{ marginBottom: 16 }}>
+        <h3 className="card-title">Coordonnées sur les documents (bons / factures)</h3>
+        <div className="two-col">
+          <div>
+            <label className="field-label">Nom de la blanchisserie</label><input className="ubq-input" defaultValue={db.settings.companyName} onBlur={(e) => saveSettings("companyName", e.target.value)} />
+            <label className="field-label">Forme juridique</label><input className="ubq-input" defaultValue={db.settings.legalForm} onBlur={(e) => saveSettings("legalForm", e.target.value)} />
+            <label className="field-label">Capital social</label><input className="ubq-input" defaultValue={db.settings.capitalSocial} onBlur={(e) => saveSettings("capitalSocial", e.target.value)} />
+            <label className="field-label">Adresse du siège</label><input className="ubq-input" defaultValue={db.settings.companyAddress} onBlur={(e) => saveSettings("companyAddress", e.target.value)} />
+            <label className="field-label">Email</label><input className="ubq-input" defaultValue={db.settings.companyEmail} onBlur={(e) => saveSettings("companyEmail", e.target.value)} />
+          </div>
+          <div>
+            <label className="field-label">SIRET</label><input className="ubq-input" defaultValue={db.settings.siret} onBlur={(e) => saveSettings("siret", e.target.value)} />
+            <label className="field-label">N° TVA intracommunautaire</label><input className="ubq-input" defaultValue={db.settings.tvaIntra} onBlur={(e) => saveSettings("tvaIntra", e.target.value)} />
+            <label className="field-label">RCS</label><input className="ubq-input" defaultValue={db.settings.rcs} onBlur={(e) => saveSettings("rcs", e.target.value)} />
+            <label className="field-label">Taux de TVA (%)</label><input className="ubq-input" type="number" defaultValue={db.settings.tvaRate} onBlur={(e) => saveSettings("tvaRate", parseFloat(e.target.value) || 0)} />
+            <label className="field-label">Délai de paiement (jours)</label><input className="ubq-input" type="number" defaultValue={db.settings.paymentTermsDays} onBlur={(e) => saveSettings("paymentTermsDays", parseInt(e.target.value) || 30)} />
+          </div>
         </div>
       </div>
+
+      <SimpleListManager
+        title="Catégories de clients"
+        items={categories}
+        onAdd={async (name) => { if (!name.trim()) return; try { await api.addClientCategory({ name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+        onEdit={async (id, name) => { try { await api.patchClientCategory(id, { name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+        onDelete={async (id) => { try { await api.deleteClientCategory(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+      />
+
+      <SimpleListManager
+        title="Modes de règlement"
+        items={paymentMethods}
+        extraField={{ key: "default_days", suffix: "jours", placeholder: "Jours" }}
+        onAdd={async (name, days) => { if (!name.trim()) return; try { await api.addPaymentMethod({ name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+        onEdit={async (id, name, days) => { try { await api.patchPaymentMethod(id, { name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+        onDelete={async (id) => { try { await api.deletePaymentMethod(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+      />
     </div>
   );
 }
@@ -1074,6 +1104,7 @@ function Clients({ db, refresh, notify }) {
   const [subTab, setSubTab] = useState("list"); // 'prospects' | 'form' | 'list'
   const [editingClient, setEditingClient] = useState(null); // null = nouveau client
   const [sortBy, setSortBy] = useState("name"); // 'name' | 'number' | 'category'
+  const [sortDir, setSortDir] = useState("asc"); // 'asc' | 'desc'
   const [search, setSearch] = useState("");
 
   const loadLists = useCallback(async () => {
@@ -1096,15 +1127,20 @@ function Clients({ db, refresh, notify }) {
   const filtered = db.clients.filter((c) => {
     if (!search.trim()) return false;
     const q = search.trim().toLowerCase();
-    if (sortBy === "number") return (c.clientNumber || "").toLowerCase().includes(q);
-    if (sortBy === "category") return categoryName(c.categoryId).toLowerCase().includes(q);
-    return c.name.toLowerCase().includes(q);
+    return c.name.toLowerCase().includes(q) || (c.clientNumber || "").toLowerCase().includes(q) || categoryName(c.categoryId).toLowerCase().includes(q);
   });
   const sortedClients = [...filtered].sort((a, b) => {
-    if (sortBy === "number") return (a.clientNumber || "").localeCompare(b.clientNumber || "", "fr", { numeric: true });
-    if (sortBy === "category") return categoryName(a.categoryId).localeCompare(categoryName(b.categoryId), "fr") || a.name.localeCompare(b.name, "fr");
-    return a.name.localeCompare(b.name, "fr");
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortBy === "number") return dir * (a.clientNumber || "").localeCompare(b.clientNumber || "", "fr", { numeric: true });
+    if (sortBy === "category") return dir * (categoryName(a.categoryId).localeCompare(categoryName(b.categoryId), "fr") || a.name.localeCompare(b.name, "fr"));
+    return dir * a.name.localeCompare(b.name, "fr");
   });
+
+  function sortByColumn(key) {
+    if (sortBy === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortBy(key); setSortDir("asc"); }
+  }
+  function sortArrow(key) { return sortBy === key ? (sortDir === "asc" ? " ▲" : " ▼") : ""; }
 
   const SUB_TABS = [
     { id: "prospects", label: "Envoi lien prospect" },
@@ -1141,73 +1177,51 @@ function Clients({ db, refresh, notify }) {
       )}
 
       {subTab === "list" && (
-        <>
-          <div className="ubq-card" style={{ marginBottom: 16 }}>
-            <div className="row-between" style={{ flexWrap: "wrap", gap: 10 }}>
-              <input
-                className="ubq-input"
-                style={{ maxWidth: 320 }}
-                placeholder={`Rechercher un client par ${sortBy === "number" ? "numéro" : sortBy === "category" ? "catégorie" : "nom"}…`}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <span className="muted small">Rechercher par</span>
-                <div className="seg">
-                  <button className={`seg-btn ${sortBy === "name" ? "seg-active" : ""}`} onClick={() => setSortBy("name")}>Nom</button>
-                  <button className={`seg-btn ${sortBy === "number" ? "seg-active" : ""}`} onClick={() => setSortBy("number")}>N° client</button>
-                  <button className={`seg-btn ${sortBy === "category" ? "seg-active" : ""}`} onClick={() => setSortBy("category")}>Catégorie</button>
-                </div>
-              </div>
-            </div>
-
-            {!search.trim() && <div className="term-muted small" style={{ marginTop: 12 }}>Tape un nom, un numéro ou une catégorie pour retrouver un client — ou utilise "Création client" pour en ajouter un nouveau.</div>}
-
-            {search.trim() && (
-              <table className="ubq-table" style={{ marginTop: 14 }}>
-                <thead><tr><th>N°</th><th>Nom</th><th>Catégorie</th><th>Email</th><th>À facturer</th><th></th></tr></thead>
-                <tbody>
-                  {sortedClients.map((c) => {
-                    const aFacturer = db.deliveryNotes.filter((n) => n.clientId === c.id && n.status === "envoye" && !n.invoiced);
-                    return (
-                      <tr key={c.id}>
-                        <td className="mono muted">{c.clientNumber}</td>
-                        <td style={{ fontWeight: 600 }}>{c.name}</td>
-                        <td>{categoryName(c.categoryId) && <span className="pill pill-steel">{categoryName(c.categoryId)}</span>}</td>
-                        <td className="muted">{c.email}</td>
-                        <td>{aFacturer.length}</td>
-                        <td>
-                          <div className="actions-row">
-                            <button className="icon-btn" title="Modifier la fiche" onClick={() => openEdit(c)}><Pencil size={15} /></button>
-                            <button className="icon-btn" title="Réinitialiser le mot de passe" onClick={() => resetPassword(c.id)}><Lock size={15} /></button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {sortedClients.length === 0 && <tr><td colSpan={6} className="term-muted" style={{ padding: 14 }}>Aucun client ne correspond.</td></tr>}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          <SimpleListManager
-            title="Catégories de clients"
-            items={categories}
-            onAdd={async (name) => { if (!name.trim()) return; try { await api.addClientCategory({ name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-            onEdit={async (id, name) => { try { await api.patchClientCategory(id, { name }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-            onDelete={async (id) => { try { await api.deleteClientCategory(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
+        <div className="ubq-card">
+          <input
+            className="ubq-input"
+            style={{ maxWidth: 320 }}
+            placeholder="Rechercher un client (nom, n°, catégorie)…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
 
-          <SimpleListManager
-            title="Modes de règlement"
-            items={paymentMethods}
-            extraField={{ key: "default_days", suffix: "jours", placeholder: "Jours" }}
-            onAdd={async (name, days) => { if (!name.trim()) return; try { await api.addPaymentMethod({ name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-            onEdit={async (id, name, days) => { try { await api.patchPaymentMethod(id, { name, defaultDays: days }); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-            onDelete={async (id) => { try { await api.deletePaymentMethod(id); loadLists(); } catch (err) { notify(`Erreur : ${err.message}`); } }}
-          />
-        </>
+          {!search.trim() && <div className="term-muted small" style={{ marginTop: 12 }}>Tape un nom, un numéro ou une catégorie pour retrouver un client — ou utilise "Création client" pour en ajouter un nouveau.</div>}
+
+          {search.trim() && (
+            <table className="ubq-table" style={{ marginTop: 14 }}>
+              <thead>
+                <tr>
+                  <th className="th-sortable" onClick={() => sortByColumn("number")}>N°{sortArrow("number")}</th>
+                  <th className="th-sortable" onClick={() => sortByColumn("name")}>Nom{sortArrow("name")}</th>
+                  <th className="th-sortable" onClick={() => sortByColumn("category")}>Catégorie{sortArrow("category")}</th>
+                  <th>Email</th><th>À facturer</th><th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedClients.map((c) => {
+                  const aFacturer = db.deliveryNotes.filter((n) => n.clientId === c.id && n.status === "envoye" && !n.invoiced);
+                  return (
+                    <tr key={c.id}>
+                      <td className="mono muted">{c.clientNumber}</td>
+                      <td style={{ fontWeight: 600 }}>{c.name}</td>
+                      <td>{categoryName(c.categoryId) && <span className="pill pill-steel">{categoryName(c.categoryId)}</span>}</td>
+                      <td className="muted">{c.email}</td>
+                      <td>{aFacturer.length}</td>
+                      <td>
+                        <div className="actions-row">
+                          <button className="icon-btn" title="Modifier la fiche" onClick={() => openEdit(c)}><Pencil size={15} /></button>
+                          <button className="icon-btn" title="Réinitialiser le mot de passe" onClick={() => resetPassword(c.id)}><Lock size={15} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {sortedClients.length === 0 && <tr><td colSpan={6} className="term-muted" style={{ padding: 14 }}>Aucun client ne correspond.</td></tr>}
+              </tbody>
+            </table>
+          )}
+        </div>
       )}
     </div>
   );
@@ -1595,6 +1609,7 @@ const CSS = `
 .pill { display:inline-block; padding:3px 9px; border-radius:20px; font-size:12px; font-weight:600; } .pill-steel { background:var(--steel-soft); color:var(--steel); }
 .pill-amber { background:var(--amber-soft); color:var(--amber); } .pill-moss { background:var(--moss-soft); color:var(--moss); }
 .ubq-table { width:100%; border-collapse:collapse; font-size:13.5px; } .ubq-table th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-500); padding:6px 8px; border-bottom:1px solid var(--line); }
+.th-sortable { cursor:pointer; user-select:none; } .th-sortable:hover { color:var(--ink-900); }
 .ubq-table td { padding:9px 8px; border-bottom:1px solid var(--line); } .ubq-table tr:last-child td { border-bottom:none; }
 .row-between { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; } .client-name { display:flex; align-items:center; gap:8px; font-weight:600; font-size:15px; flex-wrap:wrap; }
 .add-client-form { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; } .add-client-form input { flex:1; min-width:160px; }
