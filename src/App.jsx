@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   LayoutDashboard, PackageCheck, Truck, AlertTriangle, Building2, Radio, Plus, X, Check,
   Loader2, FileText, Send, Pencil, Trash2, Printer, Lock, LogOut, Eye, Receipt, ArrowUp, ArrowDown, ShieldCheck, EyeOff, Tags, Landmark,
+  Inbox, Layers, CheckCircle2,
 } from "lucide-react";
 import { api, setToken, getToken } from "./api.js";
 import { connectRealtime, onRealtime, disconnectRealtime } from "./realtime.js";
@@ -375,6 +376,188 @@ function LingePerdu({ db, typeById, refresh, notify }) {
           </table>
         )}
       </div>
+    </div>
+  );
+}
+
+function CommandesEnAttente({ db, typeById, refresh, notify }) {
+  const [orders, setOrders] = useState(null);
+
+  const load = useCallback(async () => {
+    try { setOrders(await api.getOrders({ status: "attente" })); } catch (err) { notify(`Erreur : ${err.message}`); }
+  }, [notify]);
+  useEffect(() => { load(); }, [load]);
+
+  async function start(order) {
+    try { await api.startOrder(order.id); notify("Traitement démarré — retrouve ce lot dans \"Linge-client en cours de traitement\"."); load(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  const clientName = (id) => db.clients.find((c) => c.id === id)?.name || "—";
+
+  if (!orders) return <div className="ubq-card term-muted">Chargement…</div>;
+
+  return (
+    <div className="ubq-card">
+      <h3 className="card-title">Commandes en attente de préparation ({orders.length})</h3>
+      {orders.length === 0 && <div className="term-muted">Aucune commande en attente.</div>}
+      {orders.map((o) => (
+        <div className="ubq-card" key={o.id} style={{ marginBottom: 12 }}>
+          <div className="row-between">
+            <div>
+              <div style={{ fontWeight: 600 }}>{clientName(o.client_id)}</div>
+              <div className="muted small">{fmtDate(o.created_at)}</div>
+              <div className="muted small" style={{ marginTop: 6 }}>
+                {o.items.map((it) => `${typeById(it.type_id).name} × ${it.quantity}`).join(" · ")}
+              </div>
+              {o.notes && <div className="muted small" style={{ marginTop: 4 }}>Note : {o.notes}</div>}
+            </div>
+            <button className="btn btn-steel btn-sm" onClick={() => start(o)}>Démarrer le traitement</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const STEP_DEFS = [
+  { key: "step_tri", label: "1 · Tri" },
+  { key: "step_lavage", label: "2 · Lavage" },
+  { key: "step_sechage", label: "3 · Séchage" },
+  { key: "step_pliage", label: "4A · Pliage" },
+  { key: "step_calandre", label: "4B · Calandre" },
+];
+
+function BatchPrepareForm({ batch, notify, onDone }) {
+  const [catalog, setCatalog] = useState([]);
+  const [qty, setQty] = useState({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const rows = await api.getClientLinenTypes(batch.client_id);
+        setCatalog(rows.filter((r) => r.included));
+        const init = {};
+        batch.orderItems.forEach((it) => { init[it.type_id] = it.quantity; });
+        setQty(init);
+      } catch (err) { notify(`Erreur : ${err.message}`); }
+    })();
+  }, [batch, notify]);
+
+  async function save() {
+    const items = Object.entries(qty).filter(([, v]) => Number(v) > 0).map(([typeId, quantity]) => ({ typeId, quantity: Number(quantity) }));
+    if (items.length === 0) { notify("Indique au moins une quantité."); return; }
+    setSaving(true);
+    try { await api.prepareBatch(batch.id, items); notify("Préparation enregistrée — à retrouver dans \"Validation des expéditions\"."); onDone(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+    setSaving(false);
+  }
+
+  return (
+    <div className="ubq-card" style={{ marginTop: 10 }}>
+      <div className="field-label" style={{ margin: "0 0 10px" }}>Quantités à expédier</div>
+      {catalog.map((t) => (
+        <div className="pending-row" key={t.typeId}>
+          <span style={{ flex: 1 }}>{t.name}</span>
+          <input className="ubq-input mono" type="number" min="0" style={{ width: 90 }}
+            value={qty[t.typeId] ?? ""} onChange={(e) => setQty((q) => ({ ...q, [t.typeId]: e.target.value }))} />
+        </div>
+      ))}
+      <button className="btn btn-moss btn-sm" disabled={saving} onClick={save} style={{ marginTop: 12 }}>
+        {saving ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Enregistrer
+      </button>
+    </div>
+  );
+}
+
+function LingeEnTraitement({ db, notify, refresh }) {
+  const [batches, setBatches] = useState(null);
+  const [preparing, setPreparing] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const all = await api.getBatches();
+      setBatches(all.filter((b) => b.status === "traitement" || b.status === "a_preparer"));
+    } catch (err) { notify(`Erreur : ${err.message}`); }
+  }, [notify]);
+  useEffect(() => { load(); }, [load]);
+
+  async function toggleStep(batch, key) {
+    try { await api.patchBatchSteps(batch.id, { [key]: !batch[key] }); load(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  const clientName = (id) => db.clients.find((c) => c.id === id)?.name || "—";
+
+  if (!batches) return <div className="ubq-card term-muted">Chargement…</div>;
+
+  return (
+    <div className="ubq-card">
+      <h3 className="card-title">Linge-client en cours de traitement ({batches.length})</h3>
+      {batches.length === 0 && <div className="term-muted">Aucun lot en cours.</div>}
+      {batches.map((b) => (
+        <div className="ubq-card" key={b.id} style={{ marginBottom: 12 }}>
+          <div className="row-between">
+            <div style={{ fontWeight: 600 }}>{clientName(b.client_id)}</div>
+            <span className="muted small">{fmtDate(b.created_at)}</span>
+          </div>
+          <div className="row-between" style={{ flexWrap: "wrap", gap: 14, marginTop: 10 }}>
+            {STEP_DEFS.map((s) => (
+              <label className="check-inline" key={s.key} style={{ fontSize: 13.5 }}>
+                <input type="checkbox" checked={!!b[s.key]} onChange={() => toggleStep(b, s.key)} /> {s.label} fait
+              </label>
+            ))}
+          </div>
+          {b.status === "a_preparer" && preparing !== b.id && (
+            <button className="btn btn-steel btn-sm" style={{ marginTop: 12 }} onClick={() => setPreparing(b.id)}>
+              Préparer le linge-client en expédition
+            </button>
+          )}
+          {preparing === b.id && (
+            <BatchPrepareForm batch={b} notify={notify} onDone={() => { setPreparing(null); load(); }} />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ValidationExpeditions({ db, typeById, notify, refresh }) {
+  const [batches, setBatches] = useState(null);
+
+  const load = useCallback(async () => {
+    try { setBatches(await api.getBatches({ status: "a_valider" })); } catch (err) { notify(`Erreur : ${err.message}`); }
+  }, [notify]);
+  useEffect(() => { load(); }, [load]);
+
+  async function validate(b) {
+    try { const res = await api.validateBatch(b.id); notify(`Bon de livraison ${res.numero} créé.`); load(); refresh(); }
+    catch (err) { notify(`Erreur : ${err.message}`); }
+  }
+
+  const clientName = (id) => db.clients.find((c) => c.id === id)?.name || "—";
+
+  if (!batches) return <div className="ubq-card term-muted">Chargement…</div>;
+
+  return (
+    <div className="ubq-card">
+      <h3 className="card-title">Validation des expéditions ({batches.length})</h3>
+      {batches.length === 0 && <div className="term-muted">Rien à valider pour l'instant.</div>}
+      {batches.map((b) => (
+        <div className="ubq-card" key={b.id} style={{ marginBottom: 12 }}>
+          <div className="row-between">
+            <div>
+              <div style={{ fontWeight: 600 }}>{clientName(b.client_id)}</div>
+              <div className="muted small">Préparé le {fmtDate(b.prepared_at)}</div>
+              <div className="muted small" style={{ marginTop: 6 }}>
+                {b.items.map((it) => `${typeById(it.type_id).name} × ${it.quantity}`).join(" · ")}
+              </div>
+            </div>
+            <button className="btn btn-moss btn-sm" onClick={() => validate(b)}><Check size={14} /> Valider</button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1278,7 +1461,71 @@ function ProspectForm({ token }) {
 /*  Espace client                                                       */
 /* ------------------------------------------------------------------ */
 
+function ClientOrderForm({ notify }) {
+  const [catalog, setCatalog] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [qty, setQty] = useState({});
+  const [notesText, setNotesText] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [cat, ord] = await Promise.all([api.portalOrderCatalog(), api.portalGetOrders()]);
+      setCatalog(cat); setOrders(ord);
+    } catch (err) { notify(`Erreur : ${err.message}`); }
+  }, [notify]);
+  useEffect(() => { load(); }, [load]);
+
+  async function submit() {
+    const items = Object.entries(qty).filter(([, v]) => Number(v) > 0).map(([typeId, quantity]) => ({ typeId, quantity: Number(quantity) }));
+    if (items.length === 0) { notify("Indique au moins une quantité."); return; }
+    setSaving(true);
+    try {
+      await api.portalCreateOrder({ items, notes: notesText });
+      notify("Commande envoyée.");
+      setQty({}); setNotesText(""); load();
+    } catch (err) { notify(`Erreur : ${err.message}`); }
+    setSaving(false);
+  }
+
+  const statusLabel = { attente: "En attente", en_traitement: "En traitement", terminee: "Terminée" };
+
+  if (!catalog) return <div className="ubq-card term-muted" style={{ marginBottom: 16 }}>Chargement…</div>;
+
+  return (
+    <div className="ubq-card" style={{ marginBottom: 16 }}>
+      <h3 className="card-title">Passer une commande</h3>
+      {catalog.map((t) => (
+        <div className="pending-row" key={t.typeId}>
+          <span style={{ flex: 1 }}>{t.name}</span>
+          <input className="ubq-input mono" type="number" min="0" style={{ width: 90 }}
+            value={qty[t.typeId] ?? ""} onChange={(e) => setQty((q) => ({ ...q, [t.typeId]: e.target.value }))} />
+        </div>
+      ))}
+      <label className="field-label">Remarque (optionnel)</label>
+      <input className="ubq-input" value={notesText} onChange={(e) => setNotesText(e.target.value)} />
+      <button className="btn btn-moss btn-sm" disabled={saving} onClick={submit} style={{ marginTop: 12 }}>
+        {saving ? <Loader2 size={14} className="spin" /> : <Check size={14} />} Envoyer la commande
+      </button>
+
+      {orders.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div className="field-label" style={{ margin: "0 0 8px" }}>Mes commandes</div>
+          <table className="ubq-table">
+            <thead><tr><th>Date</th><th>Statut</th></tr></thead>
+            <tbody>{orders.map((o) => (
+              <tr key={o.id}><td>{fmtDate(o.created_at)}</td><td><span className="pill pill-steel">{statusLabel[o.status]}</span></td></tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClientPortal({ onExit, onLoggedIn, clientAuth, typeById, settings }) {
+  const [portalToast, setPortalToast] = useState(null);
+  const notify = useCallback((msg) => { setPortalToast(msg); setTimeout(() => setPortalToast(null), 4000); }, []);
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [error, setError] = useState("");
   const [notes, setNotes] = useState(null); const [invoices, setInvoices] = useState(null); const [preview, setPreview] = useState(null);
 
@@ -1336,6 +1583,7 @@ function ClientPortal({ onExit, onLoggedIn, clientAuth, typeById, settings }) {
         <button className="btn btn-ghost btn-sm" onClick={logout}><LogOut size={14} /> Déconnexion</button>
       </header>
       <div className="portal-body">
+        <ClientOrderForm notify={notify} />
         <div className="ubq-card" style={{ marginBottom: 16 }}>
           <h3 className="card-title">Bons de livraison</h3>
           <table className="ubq-table"><thead><tr><th>Numéro</th><th>Date</th><th>Pièces</th><th>Total</th><th></th></tr></thead>
@@ -1366,6 +1614,7 @@ function ClientPortal({ onExit, onLoggedIn, clientAuth, typeById, settings }) {
         </div>
       </div>
       {preview && <DocumentSheet onClose={() => setPreview(null)} settings={settings} client={clientAuth} doc={preview} />}
+      {portalToast && <div className="toast">{portalToast}</div>}
     </div>
   );
 }
@@ -1413,6 +1662,9 @@ const NAV = [
   { id: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
   { id: "reception", label: "Réception", icon: PackageCheck },
   { id: "expedition", label: "Expédition", icon: Truck },
+  { id: "orders", label: "Commandes en attente de préparation", icon: Inbox },
+  { id: "batches", label: "Linge-client en cours de traitement", icon: Layers },
+  { id: "validation", label: "Validation des expéditions", icon: CheckCircle2 },
   { id: "bons", label: "Bons de livraison", icon: FileText },
   { id: "facturation", label: "Facturation", icon: Receipt },
   { id: "perdu", label: "Linge perdu", icon: AlertTriangle },
@@ -1518,6 +1770,9 @@ export default function App() {
           {tab === "dashboard" && <Dashboard db={db} typeById={typeById} />}
           {tab === "reception" && <Reception db={db} typeById={typeById} refresh={refresh} notify={notify} />}
           {tab === "expedition" && <Expedition db={db} typeById={typeById} refresh={refresh} notify={notify} />}
+          {tab === "orders" && <CommandesEnAttente db={db} typeById={typeById} refresh={refresh} notify={notify} />}
+          {tab === "batches" && <LingeEnTraitement db={db} notify={notify} refresh={refresh} />}
+          {tab === "validation" && <ValidationExpeditions db={db} typeById={typeById} notify={notify} refresh={refresh} />}
           {tab === "bons" && <BonsLivraison db={db} typeById={typeById} refresh={refresh} notify={notify} />}
           {tab === "facturation" && <Facturation db={db} typeById={typeById} refresh={refresh} notify={notify} />}
           {tab === "perdu" && <LingePerdu db={db} typeById={typeById} refresh={refresh} notify={notify} />}
@@ -1639,3 +1894,4 @@ const CSS = `
 .portal-body { padding:22px 28px 40px; max-width:900px; margin:0 auto; }
 @media print { body * { visibility:hidden; } .print-sheet, .print-sheet * { visibility:visible; } .print-sheet { position:absolute; top:0; left:0; width:100%; box-shadow:none; } .no-print, .print-toolbar { display:none !important; } }
 `;
+
