@@ -101,4 +101,18 @@ export const api = {
   portalInvoices: () => request("/api/portal/invoices"),
   portalLinenTypes: () => request("/api/portal/linen-types"),
   portalSettings: () => request("/api/portal/settings"),
+
+  portalOrderCatalog: () => request("/api/portal/orders/catalog"),
+  portalCreateOrder: (body) => request("/api/portal/orders", { method: "POST", body }),
+  portalGetOrders: () => request("/api/portal/orders"),
+
+  getOrders: (params) => request(`/api/orders${qs(params)}`),
+  startOrder: (id) => request(`/api/orders/${id}/start`, { method: "POST" }),
+
+  getBatches: (params) => request(`/api/batches${qs(params)}`),
+  getBatch: (id) => request(`/api/batches/${id}`),
+  createBatch: (clientId) => request("/api/batches", { method: "POST", body: { clientId } }),
+  patchBatchSteps: (id, steps) => request(`/api/batches/${id}/steps`, { method: "PATCH", body: steps }),
+  prepareBatch: (id, items) => request(`/api/batches/${id}/prepare`, { method: "POST", body: { items } }),
+  validateBatch: (id) => request(`/api/batches/${id}/validate`, { method: "POST" }),
 };
